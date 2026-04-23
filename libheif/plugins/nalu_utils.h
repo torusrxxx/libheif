@@ -67,6 +67,7 @@ public:
     int size(int nal_type);
 
     const heif_error parseHevcNalu(const uint8_t *cdata, size_t size);
+    heif_error buildWithStartCodesHevc(uint8_t** data, size_t* size, size_t additional_pad_size);
 
     void clear();
 private:
