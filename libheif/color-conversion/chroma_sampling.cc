@@ -85,7 +85,7 @@ Op_YCbCr444_to_YCbCr420_average<Pixel>::convert_colorspace(const std::shared_ptr
                                                            const heif_color_conversion_options_ext& options_ext,
                                                            const heif_security_limits* limits) const
 {
-  bool hdr = !std::is_same<Pixel, uint8_t>::value;
+  constexpr bool hdr = !std::is_same<Pixel, uint8_t>::value;
 
   int bpp_y = input->get_bits_per_pixel(heif_channel_Y);
   int bpp_cb = input->get_bits_per_pixel(heif_channel_Cb);
@@ -98,7 +98,7 @@ Op_YCbCr444_to_YCbCr420_average<Pixel>::convert_colorspace(const std::shared_ptr
     bpp_a = input->get_bits_per_pixel(heif_channel_Alpha);
   }
 
-  if (!hdr) {
+  if constexpr (!hdr) {
     if (bpp_y > 8 ||
         bpp_cb > 8 ||
         bpp_cr > 8) {
@@ -156,7 +156,7 @@ Op_YCbCr444_to_YCbCr420_average<Pixel>::convert_colorspace(const std::shared_ptr
   out_cb = (Pixel*) outimg->get_channel_memory(heif_channel_Cb, &out_cb_stride);
   out_cr = (Pixel*) outimg->get_channel_memory(heif_channel_Cr, &out_cr_stride);
 
-  if (hdr) {
+  if constexpr (hdr) {
     in_y_stride /= 2;
     in_cb_stride /= 2;
     in_cr_stride /= 2;
@@ -267,7 +267,7 @@ Op_YCbCr444_to_YCbCr422_average<Pixel>::state_after_conversion(const ColorState&
     return {};
   }
 
-  bool hdr = !std::is_same<Pixel, uint8_t>::value;
+  constexpr bool hdr = !std::is_same<Pixel, uint8_t>::value;
 
   if ((input_state.bits_per_pixel > 8) != hdr) {
     return {};
@@ -309,7 +309,7 @@ Op_YCbCr444_to_YCbCr422_average<Pixel>::convert_colorspace(const std::shared_ptr
                                                            const heif_color_conversion_options_ext& options_ext,
                                                            const heif_security_limits* limits) const
 {
-  bool hdr = !std::is_same<Pixel, uint8_t>::value;
+  constexpr bool hdr = !std::is_same<Pixel, uint8_t>::value;
 
   int bpp_y = input->get_bits_per_pixel(heif_channel_Y);
   int bpp_cb = input->get_bits_per_pixel(heif_channel_Cb);
@@ -322,7 +322,7 @@ Op_YCbCr444_to_YCbCr422_average<Pixel>::convert_colorspace(const std::shared_ptr
     bpp_a = input->get_bits_per_pixel(heif_channel_Alpha);
   }
 
-  if (!hdr) {
+  if constexpr (!hdr) {
     if (bpp_y > 8 ||
         bpp_cb > 8 ||
         bpp_cr > 8) {
@@ -393,7 +393,7 @@ Op_YCbCr444_to_YCbCr422_average<Pixel>::convert_colorspace(const std::shared_ptr
   }
 
 
-  if (hdr) {
+  if constexpr (hdr) {
     in_y_stride /= 2;
     in_cb_stride /= 2;
     in_cr_stride /= 2;
@@ -414,9 +414,8 @@ Op_YCbCr444_to_YCbCr422_average<Pixel>::convert_colorspace(const std::shared_ptr
 
   // --- averaging filter
 
-  uint32_t x, y;
-  for (y = 0; y < height; y++) {
-    for (x = 0; x < width - 1; x += 2) {
+  for (uint32_t y = 0; y < height; y++) {
+    for (uint32_t x = 0; x < width - 1; x += 2) {
       Pixel cb00 = in_cb[y * in_cb_stride + x];
       Pixel cr00 = in_cr[y * in_cr_stride + x];
       Pixel cb01 = in_cb[y * in_cb_stride + x + 1];
@@ -429,7 +428,7 @@ Op_YCbCr444_to_YCbCr422_average<Pixel>::convert_colorspace(const std::shared_ptr
 
   // TODO: check whether we can use HeifPixelImage::transfer_channel_from_image_as() instead of copying Y and Alpha
 
-  for (y = 0; y < height; y++) {
+  for (uint32_t y = 0; y < height; y++) {
     uint32_t copyWidth = (hdr ? width * 2 : width);
 
     memcpy(&out_y[y * out_y_stride], &in_y[y * in_y_stride], copyWidth);
@@ -469,7 +468,7 @@ Op_YCbCr420_bilinear_to_YCbCr444<Pixel>::state_after_conversion(const ColorState
     return {};
   }
 
-  bool hdr = !std::is_same<Pixel, uint8_t>::value;
+  constexpr bool hdr = !std::is_same<Pixel, uint8_t>::value;
 
   if ((input_state.bits_per_pixel > 8) != hdr) {
     return {};
@@ -507,7 +506,7 @@ Op_YCbCr420_bilinear_to_YCbCr444<Pixel>::convert_colorspace(const std::shared_pt
                                                             const heif_color_conversion_options_ext& options_ext,
                                                             const heif_security_limits* limits) const
 {
-  bool hdr = !std::is_same<Pixel, uint8_t>::value;
+  constexpr bool hdr = !std::is_same<Pixel, uint8_t>::value;
 
   int bpp_y = input->get_bits_per_pixel(heif_channel_Y);
   int bpp_cb = input->get_bits_per_pixel(heif_channel_Cb);
@@ -520,7 +519,7 @@ Op_YCbCr420_bilinear_to_YCbCr444<Pixel>::convert_colorspace(const std::shared_pt
     bpp_a = input->get_bits_per_pixel(heif_channel_Alpha);
   }
 
-  if (!hdr) {
+  if constexpr (!hdr) {
     if (bpp_y > 8 ||
         bpp_cb > 8 ||
         bpp_cr > 8) {
@@ -588,7 +587,7 @@ Op_YCbCr420_bilinear_to_YCbCr444<Pixel>::convert_colorspace(const std::shared_pt
   }
 
 
-  if (hdr) {
+  if constexpr (hdr) {
     in_y_stride /= 2;
     in_cb_stride /= 2;
     in_cr_stride /= 2;
@@ -680,9 +679,8 @@ Op_YCbCr420_bilinear_to_YCbCr444<Pixel>::convert_colorspace(const std::shared_pt
 
   // --- bilinear filtering of inner part
 
-  uint32_t x, y;
-  for (y = 1; y < height - 1; y += 2) {
-    for (x = 1; x < width - 1; x += 2) {
+  for (uint32_t y = 1; y < height - 1; y += 2) {
+    for (uint32_t x = 1; x < width - 1; x += 2) {
       uint32_t cx = x / 2;
       uint32_t cy = y / 2;
 
@@ -709,7 +707,7 @@ Op_YCbCr420_bilinear_to_YCbCr444<Pixel>::convert_colorspace(const std::shared_pt
 
   // TODO: check whether we can use HeifPixelImage::transfer_channel_from_image_as() instead of copying Y and Alpha
 
-  for (y = 0; y < height; y++) {
+  for (uint32_t y = 0; y < height; y++) {
     uint32_t copyWidth = (hdr ? width * 2 : width);
 
     memcpy(&out_y[y * out_y_stride], &in_y[y * in_y_stride], copyWidth);
@@ -750,7 +748,7 @@ Op_YCbCr422_bilinear_to_YCbCr444<Pixel>::state_after_conversion(const ColorState
     return {};
   }
 
-  bool hdr = !std::is_same<Pixel, uint8_t>::value;
+  constexpr bool hdr = !std::is_same<Pixel, uint8_t>::value;
 
   if ((input_state.bits_per_pixel > 8) != hdr) {
     return {};
@@ -788,7 +786,7 @@ Op_YCbCr422_bilinear_to_YCbCr444<Pixel>::convert_colorspace(const std::shared_pt
                                                             const heif_color_conversion_options_ext& options_ext,
                                                             const heif_security_limits* limits) const
 {
-  bool hdr = !std::is_same<Pixel, uint8_t>::value;
+  constexpr bool hdr = !std::is_same<Pixel, uint8_t>::value;
 
   int bpp_y = input->get_bits_per_pixel(heif_channel_Y);
   int bpp_cb = input->get_bits_per_pixel(heif_channel_Cb);
@@ -801,7 +799,7 @@ Op_YCbCr422_bilinear_to_YCbCr444<Pixel>::convert_colorspace(const std::shared_pt
     bpp_a = input->get_bits_per_pixel(heif_channel_Alpha);
   }
 
-  if (!hdr) {
+  if constexpr (!hdr) {
     if (bpp_y > 8 ||
         bpp_cb > 8 ||
         bpp_cr > 8) {
@@ -869,7 +867,7 @@ Op_YCbCr422_bilinear_to_YCbCr444<Pixel>::convert_colorspace(const std::shared_pt
   }
 
 
-  if (hdr) {
+  if constexpr (hdr) {
     in_y_stride /= 2;
     in_cb_stride /= 2;
     in_cr_stride /= 2;
