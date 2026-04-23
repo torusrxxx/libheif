@@ -94,4 +94,90 @@ const heif_error NalMap::parseHevcNalu(const uint8_t *cdata, size_t size)
     return heif_error_success;
 }
 
+heif_error NalMap::buildWithStartCodesHevc(uint8_t** hevc_data, size_t* hevc_data_size, size_t additional_pad_size)
+{
+    int heif_idrpic_size;
+    int heif_vps_size;
+    int heif_sps_size;
+    int heif_pps_size;
+    const unsigned char* heif_vps_data;
+    const unsigned char* heif_sps_data;
+    const unsigned char* heif_pps_data;
+    const unsigned char* heif_idrpic_data;
+
+    if ((count(HEVC_NAL_UNIT_VPS_NUT) > 0) && (count(HEVC_NAL_UNIT_SPS_NUT) > 0) && (count(HEVC_NAL_UNIT_PPS_NUT) > 0))
+    {
+        heif_vps_size = size(HEVC_NAL_UNIT_VPS_NUT);
+        heif_vps_data = data(HEVC_NAL_UNIT_VPS_NUT);
+
+        heif_sps_size = size(HEVC_NAL_UNIT_SPS_NUT);
+        heif_sps_data = data(HEVC_NAL_UNIT_SPS_NUT);
+
+        heif_pps_size = size(HEVC_NAL_UNIT_PPS_NUT);
+        heif_pps_data = data(HEVC_NAL_UNIT_PPS_NUT);
+    }
+    else
+    {
+        struct heif_error err = { heif_error_Decoder_plugin_error,
+                                    heif_suberror_End_of_data,
+                                    "Unexpected end of data" };
+        return err;
+    }
+
+    if ((count(HEVC_NAL_UNIT_IDR_W_RADL) > 0) || (count(HEVC_NAL_UNIT_IDR_N_LP) > 0))
+    {
+        if (count(HEVC_NAL_UNIT_IDR_W_RADL) > 0)
+        {
+            heif_idrpic_data = data(HEVC_NAL_UNIT_IDR_W_RADL);
+            heif_idrpic_size = size(HEVC_NAL_UNIT_IDR_W_RADL);
+        }
+        else
+        {
+            heif_idrpic_data = data(HEVC_NAL_UNIT_IDR_N_LP);
+            heif_idrpic_size = size(HEVC_NAL_UNIT_IDR_N_LP);
+        }
+    }
+    else
+    {
+        struct heif_error err = { heif_error_Decoder_plugin_error,
+                                    heif_suberror_End_of_data,
+                                    "Unexpected end of data" };
+        return err;
+    }
+
+    const char hevc_AnnexB_StartCode[] = { 0x00, 0x00, 0x00, 0x01 };
+    int hevc_AnnexB_StartCode_size = 4;
+
+    *hevc_data_size = heif_vps_size + heif_sps_size + heif_pps_size + heif_idrpic_size + 4 * hevc_AnnexB_StartCode_size;
+    *hevc_data = (uint8_t*)malloc(*hevc_data_size + additional_pad_size);
+
+    //Copy hevc pps data
+    uint8_t* hevc_data_ptr = *hevc_data;
+    memcpy(hevc_data_ptr, hevc_AnnexB_StartCode, hevc_AnnexB_StartCode_size);
+    hevc_data_ptr += hevc_AnnexB_StartCode_size;
+    memcpy(hevc_data_ptr, heif_vps_data, heif_vps_size);
+    hevc_data_ptr += heif_vps_size;
+
+    //Copy hevc sps data
+    memcpy(hevc_data_ptr, hevc_AnnexB_StartCode, hevc_AnnexB_StartCode_size);
+    hevc_data_ptr += hevc_AnnexB_StartCode_size;
+    memcpy(hevc_data_ptr, heif_sps_data, heif_sps_size);
+    hevc_data_ptr += heif_sps_size;
+
+    //Copy hevc pps data
+    memcpy(hevc_data_ptr, hevc_AnnexB_StartCode, hevc_AnnexB_StartCode_size);
+    hevc_data_ptr += hevc_AnnexB_StartCode_size;
+    memcpy(hevc_data_ptr, heif_pps_data, heif_pps_size);
+    hevc_data_ptr += heif_pps_size;
+
+    //Copy hevc idrpic data
+    memcpy(hevc_data_ptr, hevc_AnnexB_StartCode, hevc_AnnexB_StartCode_size);
+    hevc_data_ptr += hevc_AnnexB_StartCode_size;
+    memcpy(hevc_data_ptr, heif_idrpic_data, heif_idrpic_size);
+
+    map.clear();
+
+    return heif_error_success;
+}
+
 void NalMap::clear() { map.clear(); }

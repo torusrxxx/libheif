@@ -10,9 +10,6 @@
 ///
 /// @file
 
-#ifndef EXAMPLES_UTIL_HPP_
-#define EXAMPLES_UTIL_HPP_
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -338,7 +335,6 @@ void FreeExternalSystemMemorySurfacePool(mfxU8* dec_buf, mfxFrameSurface1* surfp
         free(surfpool);
 }
 
-#endif //EXAMPLES_UTIL_HPP_
 //==============================================================================
 // Copyright Intel Corporation
 //
@@ -384,8 +380,7 @@ void FreeExternalSystemMemorySurfacePool(mfxU8* dec_buf, mfxFrameSurface1* surfp
 #include <memory>
 #include <cstring>
 #include <string>
-
-#include <libde265/de265.h>
+#include "nalu_utils.h"
 
 
 #define intelvpl_buffer_max_size 4096
@@ -403,14 +398,9 @@ struct intelvpl_decoder
   intelvpl_decoder_image_chain* images = NULL;
   intelvpl_decoder_image_chain* images_current = NULL;
   mfxSession session = NULL;
-  mfxBitstream bitstream = {};
   mfxVideoParam decodeParams = {};
-  size_t residureBufferSize = 0;
-  mfxU8 residureBuffer[intelvpl_buffer_max_size] = {};
+  std::vector<uint8_t> data;
   intelvpl_decoder() {
-      memset(residureBuffer, 0, intelvpl_buffer_max_size);
-      bitstream.Data = residureBuffer;
-      bitstream.MaxLength = intelvpl_buffer_max_size;
       images = new intelvpl_decoder_image_chain();
       images_current = images;
   }
@@ -589,7 +579,7 @@ void intelvpl_set_strict_decoding(void* decoder_raw, int flag)
 }
 
 
-static heif_error intelvpl_push_datax(intelvpl_decoder* decoder, const uint8_t* ptr, uint32_t nal_size) {
+/*static heif_error intelvpl_push_datax(intelvpl_decoder* decoder, const uint8_t* ptr, uint32_t nal_size) {
     mfxStatus sts;
     uint32_t remaining = nal_size;
     mfxBitstream& bs = decoder->bitstream;
@@ -740,38 +730,13 @@ static heif_error intelvpl_push_datax(intelvpl_decoder* decoder, const uint8_t* 
             };
         }
     }
-}
+}*/
 
 static heif_error intelvpl_push_data2(void* decoder_raw, const void* data, size_t size, uintptr_t userdata)
 {
     intelvpl_decoder* decoder = (intelvpl_decoder*)decoder_raw;
-    auto& bs = decoder->bitstream;
-
-    const uint8_t* cdata = (const uint8_t*)data;
-    size_t ptr = 0;
-    while (ptr < size) {
-        if (4 > size - ptr) {
-            return {
-              heif_error_Decoder_plugin_error,
-              heif_suberror_End_of_data,
-              kEmptyString
-            };
-        }
-        uint32_t nal_size = static_cast<uint32_t>((cdata[ptr] << 24) | (cdata[ptr + 1] << 16) | (cdata[ptr + 2] << 8) | (cdata[ptr + 3]));
-        ptr += 4;
-
-        if (nal_size > size - ptr) {
-            return {
-              heif_error_Decoder_plugin_error,
-              heif_suberror_End_of_data,
-              kEmptyString
-            };
-        }
-
-        intelvpl_push_datax(decoder, cdata + ptr, nal_size);
-        ptr += nal_size;
-        //intelvpl_push_datax(decoder, cdata, size);
-    }
+    const uint8_t* input_data = (const uint8_t*)data;
+    decoder->data.insert(decoder->data.end(), input_data, input_data + size);
     return heif_error_success;
 }
 
@@ -810,6 +775,156 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
 {
     intelvpl_decoder* decoder = (intelvpl_decoder*)decoder_raw;
     heif_error err = { heif_error_Ok, heif_suberror_Unspecified, kSuccess };
+    mfxBitstream bs;
+    memset(&bs, 0, sizeof(bs));
+    mfxStatus sts;
+    uint8_t* hevc_data = NULL; // TODO: free data
+    std::unique_ptr<uint8_t, void(*)(void*)> hevc_data_free(hevc_data, free);
+    size_t hevc_data_size;
+    if (!decoder->initialized) {
+        NalMap nalus;
+        err = nalus.parseHevcNalu(decoder->data.data(), decoder->data.size());
+        if (err.code != heif_error_Ok) {
+            return err;
+        }
+
+        err = nalus.buildWithStartCodesHevc(&hevc_data, &hevc_data_size, 0);
+
+        if (err.code != heif_error_Ok) {
+            return err;
+        }
+        bs.Data = hevc_data;
+        bs.MaxLength = hevc_data_size;
+        bs.DataLength = hevc_data_size;
+        //nFrameReturned = dec.Decode(hevc_data, hevc_data_size);
+        decoder->decodeParams.mfx.CodecId = MFX_CODEC_HEVC;
+        decoder->decodeParams.IOPattern = MFX_IOPATTERN_OUT_SYSTEM_MEMORY;
+        sts = MFXVideoDECODE_DecodeHeader(decoder->session, &bs, &decoder->decodeParams);
+        if (MFX_ERR_NONE != sts && MFX_ERR_MORE_DATA != sts) {
+            return {
+              heif_error_Decoder_plugin_error,
+              heif_suberror_End_of_data,
+              "Error decoding header\n"
+            };
+        }
+        if (MFX_ERR_NONE != sts)
+            return err;
+        // input parameters finished, now initialize decode
+        sts = MFXVideoDECODE_Init(decoder->session, &decoder->decodeParams);
+        if (MFX_ERR_NONE != sts) {
+            return {
+              heif_error_Decoder_plugin_error,
+              heif_suberror_End_of_data,
+              "Error initializing decode\n"
+            };
+        }
+        decoder->initialized = true;
+    }
+
+    bool setempty = false;
+        while (bs.DataLength > 0 || setempty) {
+            /*if (bs.DataLength > 0 && bs.DataOffset > 0) {
+                // Fix data offset to 0
+                memmove(bs.Data, bs.Data + bs.DataOffset, bs.DataLength);
+            }
+            bs.DataOffset = 0;
+            if (bs.DataLength + remaining <= intelvpl_buffer_max_size) {
+                memcpy(bs.Data + bs.DataLength, ptr, remaining);
+                bs.DataLength += remaining;
+                ptr += remaining;
+                remaining = 0;
+            }
+            else {
+                memcpy(bs.Data + bs.DataLength, ptr, intelvpl_buffer_max_size - bs.DataLength);
+                remaining -= intelvpl_buffer_max_size - bs.DataLength;
+                ptr += intelvpl_buffer_max_size - bs.DataLength;
+                bs.DataLength = intelvpl_buffer_max_size;
+            }*/
+            sts = MFXVideoDECODE_DecodeFrameAsync(decoder->session,
+                bs.DataLength == 0 ? NULL : &bs, //(isDraining) ? NULL : &bs,
+                NULL,
+                &decoder->images_current->decSurfaceOut,
+                &decoder->images_current->syncp);
+            switch (sts) {
+            case MFX_ERR_NONE:
+                decoder->images_current->next = new intelvpl_decoder_image_chain();
+                if (decoder->images_current->next == NULL) {
+                    return {
+                      heif_error_Decoder_plugin_error,
+                      heif_suberror_End_of_data,
+                      "new failure\n"
+                    };
+                }
+                decoder->images_current = decoder->images_current->next;
+                break;
+            case MFX_ERR_MORE_DATA:
+                // The function requires more bitstream at input before decoding can
+                // proceed
+                if (setempty == false && bs.DataLength == 0) {
+                    setempty = true; // Needs one more MFXVideoDECODE_DecodeFrameAsync call with NULL bitstream
+                }
+                else {
+                    setempty = false;
+                }
+                break;
+            case MFX_ERR_MORE_SURFACE:
+                // The function requires more frame surface at output before decoding
+                // can proceed. This applies to external memory allocations and should
+                // not be expected for a simple internal allocation case like this
+                return {
+                  heif_error_Decoder_plugin_error,
+                  heif_suberror_End_of_data,
+                  "MFX_ERR_MORE_SURFACE\n"
+                };
+                break;
+            case MFX_ERR_DEVICE_LOST:
+                // For non-CPU implementations,
+                // Cleanup if device is lost
+                return {
+                  heif_error_Decoder_plugin_error,
+                  heif_suberror_End_of_data,
+                  "MFX_ERR_DEVICE_LOST\n"
+                };
+                break;
+            case MFX_WRN_DEVICE_BUSY:
+                // For non-CPU implementations,
+                // Wait a few milliseconds then try again
+                break;
+            case MFX_WRN_VIDEO_PARAM_CHANGED:
+                // The decoder detected a new sequence header in the bitstream.
+                // Video parameters may have changed.
+                // In external memory allocation case, might need to reallocate the
+                // output surface
+                break;
+            case MFX_ERR_INCOMPATIBLE_VIDEO_PARAM:
+                // The function detected that video parameters provided by the
+                // application are incompatible with initialization parameters. The
+                // application should close the component and then reinitialize it
+                return {
+                  heif_error_Decoder_plugin_error,
+                  heif_suberror_End_of_data,
+                  "MFX_ERR_INCOMPATIBLE_VIDEO_PARAM\n"
+                };
+                break;
+            case MFX_ERR_REALLOC_SURFACE:
+                // Bigger surface_work required. May be returned only if
+                // mfxInfoMFX::EnableReallocRequest was set to ON during initialization.
+                // This applies to external memory allocations and should not be
+                // expected for a simple internal allocation case like this
+                return {
+                  heif_error_Decoder_plugin_error,
+                  heif_suberror_End_of_data,
+                  "MFX_ERR_REALLOC_SURFACE\n"
+                };
+                break;
+            default:
+                return {
+                  heif_error_Decoder_plugin_error,
+                  heif_suberror_End_of_data,
+                  "unknown status\n"
+                };
+            }
+        }
 
     *out_img = nullptr;
     if (decoder->images != NULL && decoder->images->decSurfaceOut != NULL) {
@@ -880,12 +995,13 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
                         size_t dst_stride_Y;
                         uint8_t* dst_mem_Y = heif_image_get_plane2(*out_img, heif_channel_Y, &dst_stride_Y);
 
-                        pitch = data->Pitch;
+                        pitch = data->PitchHigh << 16 | data->Pitch;
                         for (int y = 0; y < h; y++) {
                             memcpy(dst_mem_Y + y * dst_stride_Y, data->Y + y * pitch, w);
                         }
                         // UV
-                        h /= 2;
+                        h = (h + 1) / 2;
+                        w = (w + 1) / 2;
                         err = heif_image_add_plane_safe(*out_img, heif_channel_Cb, w, h, 8, limits);
                         size_t dst_stride_Cb;
                         uint8_t* dst_mem_Cb = heif_image_get_plane2(*out_img, heif_channel_Cb, &dst_stride_Cb);
@@ -893,7 +1009,7 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
                         size_t dst_stride_Cr;
                         uint8_t* dst_mem_Cr = heif_image_get_plane2(*out_img, heif_channel_Cr, &dst_stride_Cr);
                         for (int y = 0; y < h; y++) {
-                            for (int x = 0; x < w / 2; x++) {
+                            for (int x = 0; x < w; x++) {
                                 dst_mem_Cb[y * dst_stride_Cb + x] = data->UV[y * pitch + x * 2];
                                 dst_mem_Cr[y * dst_stride_Cr + x] = data->UV[y * pitch + x * 2 + 1];
                             }
@@ -983,15 +1099,20 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
                 if(sts != MFX_ERR_NONE)
                     return err; // "Could not release decode output surface"
                 intelvpl_decoder_image_chain* next = decoder->images->next;
+                if (decoder->images_current == decoder->images) {
+                    decoder->images_current = next;
+                }
                 delete decoder->images;
                 decoder->images = next;
             }
 
 
         } while (sts == MFX_WRN_IN_EXECUTION);
+        return { heif_error_Ok, heif_suberror_Unspecified, kSuccess };
     }
-    else
-        return err; // TODO(farindk): Set "err" if no image was decoded.
+else {
+    return err;
+    }
 }
 
 
