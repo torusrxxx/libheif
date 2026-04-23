@@ -392,9 +392,8 @@ Op_YCbCr444_to_YCbCr422_average<Pixel>::convert_colorspace(const std::shared_ptr
 
   // --- averaging filter
 
-  uint32_t x, y;
-  for (y = 0; y < height; y++) {
-    for (x = 0; x < width - 1; x += 2) {
+  for (uint32_t y = 0; y < height; y++) {
+    for (uint32_t x = 0; x < width - 1; x += 2) {
       Pixel cb00 = in_cb[y * in_cb_stride + x];
       Pixel cr00 = in_cr[y * in_cr_stride + x];
       Pixel cb01 = in_cb[y * in_cb_stride + x + 1];
@@ -647,9 +646,8 @@ Op_YCbCr420_bilinear_to_YCbCr444<Pixel>::convert_colorspace(const std::shared_pt
 
   // --- bilinear filtering of inner part
 
-  uint32_t x, y;
-  for (y = 1; y < height - 1; y += 2) {
-    for (x = 1; x < width - 1; x += 2) {
+  for (uint32_t y = 1; y < height - 1; y += 2) {
+    for (uint32_t x = 1; x < width - 1; x += 2) {
       uint32_t cx = x / 2;
       uint32_t cy = y / 2;
 
