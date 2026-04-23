@@ -106,6 +106,10 @@
 #include "plugins/decoder_openjpeg.h"
 #endif
 
+#if HAVE_LIBVPL_DECODER
+#include "plugins/decoder_libvpl.h"
+#endif
+
 #include "plugins/encoder_mask.h"
 
 #if HAVE_OPENJPH_ENCODER
@@ -225,6 +229,10 @@ void register_default_plugins()
 
 #if HAVE_X264
   register_encoder(get_encoder_plugin_x264());
+#endif
+
+#if HAVE_LIBVPL_DECODER
+  register_decoder(get_decoder_plugin_libvpl());
 #endif
 
 #if WITH_UNCOMPRESSED_CODEC

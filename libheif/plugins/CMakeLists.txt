@@ -121,6 +121,10 @@ set(OpenH264_DECODER_sources decoder_openh264.cc decoder_openh264.h)
 set(OpenH264_DECODER_extra_plugin_sources)
 plugin_compilation(openh264dec OpenH264 OpenH264_DECODER_FOUND OpenH264_DECODER OpenH264_DECODER)
 
+set(LIBVPL_DECODER_sources decoder_libvpl.cc decoder_libvpl.h)
+set(LIBVPL_DECODER_extra_plugin_sources)
+plugin_compilation(libvpl VPL VPL_FOUND LIBVPL_DECODER LIBVPL_DECODER)
+
 target_sources(heif PRIVATE
                encoder_mask.h
                encoder_mask.cc
