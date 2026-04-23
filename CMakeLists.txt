@@ -31,7 +31,7 @@ endif()
 if (APPLE)
   option(BUILD_FRAMEWORK "Build as Apple Frameworks" OFF)
 endif()
-
+option(WITH_LIBVPL_DECODER ON)
 if(NOT MSVC)
   # cmake 3.24 introduces this variable, but for backward compatibility, we set it explicitly
   if (CMAKE_COMPILE_WARNING_AS_ERROR)
@@ -49,6 +49,10 @@ if(NOT MSVC)
       add_compile_options(-Wno-error=tautological-compare)
       add_compile_options(-Wno-error=tautological-constant-out-of-range-compare)
   endif ()
+endif()
+
+if(MSVC)
+add_compile_options(/Qvec-report:2)
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
@@ -312,6 +316,16 @@ if (WITH_OPENJPH_ENCODER OR WITH_OPENJPH_DECODER)
     find_package(OPENJPH)
 endif()
 
+plugin_option(LIBVPL_DECODER "Intel LIBVPL decoder" OFF ON)
+# OFF OFF
+if (WITH_LIBVPL_DECODER)
+message("finding LIBVPL")
+    list(PREPEND CMAKE_PREFIX_PATH "E:\\endir\\_vplinstall\\lib\\cmake\\vpl")
+    find_package(VPL)
+    INCLUDE_DIRECTORIES("E:\\endir\\_vplinstall\\include")
+    link_directories("E:\\endir\\_vplinstall\\lib")
+endif()
+
 # uncompressed
 
 option(WITH_UNCOMPRESSED_CODEC " Support internal ISO/IEC 23001-17 uncompressed codec (experimental) " OFF)
@@ -349,6 +363,7 @@ plugin_compilation_info(OPENJPH_ENCODER OPENJPH "OpenJPH HT-J2K encoder")
 plugin_compilation_info(UVG266_ENCODER UVG266 "uvg266 VVC encoder")
 plugin_compilation_info(VVENC vvenc "vvenc VVC encoder")
 plugin_compilation_info(VVDEC vvdec "vvdec VVC decoder")
+plugin_compilation_info(LIBVPL VPL "Intel LIBVPL decoder")
 
 # --- show summary which formats are supported
 
@@ -527,6 +542,9 @@ if (OpenJPEG_FOUND AND ((WITH_OpenJPEG_DECODER AND NOT (PLUGIN_LOADING_SUPPORTED
 endif()
 if (OPENJPH_FOUND AND (WITH_OPENJPH_ENCODER AND NOT (PLUGIN_LOADING_SUPPORTED_AND_ENABLED AND WITH_OPENJPH_ENCODER_PLUGIN)))
     list(APPEND REQUIRES_PRIVATE "openjph")
+endif()
+if (LIBVPL_FOUND AND (WITH_LIBVPL_DECODER AND NOT (PLUGIN_LOADING_SUPPORTED_AND_ENABLED AND WITH_LIBVPL_DECODER_PLUGIN)))
+    list(APPEND REQUIRES_PRIVATE "VPL")
 endif()
 if (LIBSHARPYUV_FOUND)
     list(APPEND REQUIRES_PRIVATE "libsharpyuv")
