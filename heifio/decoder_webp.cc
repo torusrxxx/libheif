@@ -194,7 +194,7 @@ heif_error loadWEBP(const char* filename, InputImage* input_image)
           struct heif_error err = {
             .code = heif_error_Invalid_input,
             .subcode = heif_suberror_Unspecified,
-            .message = "Cannot open WEBP file" };
+            .message = "WEBP file decoding error!" };
           return err;
       }
 
@@ -225,9 +225,11 @@ heif_error loadWEBP(const char* filename, InputImage* input_image)
           return err;
       size_t stride[4];
       uint8_t* ptr[4];
+      const int uv_width = (width + 1) / 2;
+      const int uv_height = (height + 1) / 2;
       heif_image_add_plane(image, heif_channel_Y, (int)width, (int)height, 8);
-      heif_image_add_plane(image, heif_channel_Cb, (int)width / 2, (int)height / 2, 8);
-      heif_image_add_plane(image, heif_channel_Cr, (int)width / 2, (int)height / 2, 8);
+      heif_image_add_plane(image, heif_channel_Cb, uv_width, uv_height, 8);
+      heif_image_add_plane(image, heif_channel_Cr, uv_width, uv_height, 8);
       if (config.input.has_alpha) {
           heif_image_add_plane(image, heif_channel_Alpha, (int)width, (int)height, 8);
       }
@@ -243,10 +245,10 @@ heif_error loadWEBP(const char* filename, InputImage* input_image)
       config.output.u.YUVA.y_size = height * stride[0];
       config.output.u.YUVA.u = ptr[1];
       config.output.u.YUVA.u_stride = stride[1];
-      config.output.u.YUVA.u_size = height * stride[1] / 2;
+      config.output.u.YUVA.u_size = uv_height * stride[1];
       config.output.u.YUVA.v = ptr[2];
       config.output.u.YUVA.v_stride = stride[2];
-      config.output.u.YUVA.v_size = height * stride[2] / 2;
+      config.output.u.YUVA.v_size = uv_height * stride[2];
       if (config.input.has_alpha) {
           config.output.u.YUVA.a = ptr[3];
           config.output.u.YUVA.a_stride = stride[3];
@@ -262,7 +264,7 @@ heif_error loadWEBP(const char* filename, InputImage* input_image)
           struct heif_error err = {
             .code = heif_error_Invalid_input,
             .subcode = heif_suberror_Unspecified,
-            .message = "Cannot open WEBP file" };
+            .message = "WEBP file decoding error!" };
           return err;
       }
   }
@@ -272,6 +274,10 @@ heif_error loadWEBP(const char* filename, InputImage* input_image)
         .subcode = heif_suberror_Unspecified,
         .message = "WEBP file is too strange" };
       return err;
+  }
+
+  if (config.input.has_alpha) {
+      heif_image_set_premultiplied_alpha(image, 0);
   }
 
   if (has_exif) {
