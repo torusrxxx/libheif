@@ -36,21 +36,14 @@ class WebpEncoder : public Encoder
 public:
   WebpEncoder(int quality);
 
-  // 0 = fastest compression
-  // 9 = best compression
-  // -1 = zlib default
-  void set_compression_level(int level) {
-    m_compression_level = level;
-  }
-
   heif_colorspace colorspace(bool has_alpha) const override
   {
-    return heif_colorspace_YCbCr;
+    return quality_ == 100 ? heif_colorspace_RGB : heif_colorspace_YCbCr;
   }
 
   heif_chroma chroma(bool has_alpha, int bit_depth) const override
   {
-    return heif_chroma_420;
+    return quality_ == 100 ? heif_chroma_interleaved_RGBA : heif_chroma_420;
   }
 
   bool supports_alpha() const override { return true; }
@@ -62,8 +55,7 @@ public:
               const heif_image* image, const std::string& filename) override;
 
 private:
-  int m_compression_level = -1;
-  int quality_;
+  int quality_; // WebP quality, quality 100 = switch to lossless
 };
 
 #endif  // EXAMPLE_ENCODER_WEBP_H

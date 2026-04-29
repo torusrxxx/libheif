@@ -91,15 +91,29 @@ static int WebPWriter(const uint8_t* data, size_t data_size,
 bool WebpEncoder::Encode(const heif_image_handle* handle,
                         const heif_image* image, const std::string& filename)
 {
-  int width = heif_image_get_width(image, heif_channel_Y);
-  int height = heif_image_get_height(image, heif_channel_Y);
+  int width = heif_image_get_primary_width(image);
+  int height = heif_image_get_primary_height(image);
   if (width > WEBP_MAX_DIMENSION || height > WEBP_MAX_DIMENSION || width <= 0 || height <= 0) {
     fprintf(stderr, "Image dimension is too large for WEBP\n");
     return false;
   }
   WebPConfig cfg;
-  WebPConfigInit(&cfg);
-  cfg.quality = quality_;
+  if (!WebPConfigInit(&cfg)) {
+    fprintf(stderr, "libwebp init failed!\n");
+    return false;
+  }
+  bool islossless = quality_ == 100;
+  if (islossless) {
+    if(!WebPConfigLosslessPreset(&cfg, 6)){
+      fprintf(stderr, "libwebp init failed!\n");
+      return false;
+    }
+  }
+  else {
+    cfg.quality = quality_;
+    cfg.alpha_quality = quality_;
+  }
+  cfg.thread_level = 1;
 
   WebPPicture webp;
   if (!WebPPictureInit(&webp)) {
@@ -108,28 +122,52 @@ bool WebpEncoder::Encode(const heif_image_handle* handle,
   }
   webp.width = width;
   webp.height = height;
-
-  webp.y = (uint8_t*)heif_image_get_plane_readonly(image, heif_channel_Y,
+  if (!islossless) { // Lossy
+    webp.y = (uint8_t*)heif_image_get_plane_readonly(image, heif_channel_Y,
       &webp.y_stride);
-  webp.u = (uint8_t*)heif_image_get_plane_readonly(image, heif_channel_Cb,
+    webp.u = (uint8_t*)heif_image_get_plane_readonly(image, heif_channel_Cb,
       &webp.uv_stride);
-  webp.v = (uint8_t*)heif_image_get_plane_readonly(image, heif_channel_Cr,
+    webp.v = (uint8_t*)heif_image_get_plane_readonly(image, heif_channel_Cr,
       &webp.uv_stride);
-  webp.a = (uint8_t*)heif_image_get_plane_readonly(image, heif_channel_Alpha,
+    webp.a = (uint8_t*)heif_image_get_plane_readonly(image, heif_channel_Alpha,
       &webp.a_stride);
-  if (webp.a) {
+    if (webp.a) {
       webp.colorspace = WEBP_YUV420A;
-  }
-  else {
+    }
+    else {
       webp.colorspace = WEBP_YUV420;
+    }
+  }
+  else { // Lossless
+    const uint8_t* rgba;
+    size_t rgba_stride;
+    int ok;
+    rgba = heif_image_get_plane_readonly2(image, heif_channel_interleaved,
+      &rgba_stride);
+    assert(rgba);
+    heif_chroma format = heif_image_get_chroma_format(image);
+    if(format == heif_chroma_interleaved_RGBA)
+      ok = WebPPictureImportRGBA(&webp, rgba, rgba_stride);
+    else if(format == heif_chroma_interleaved_RGB)
+      ok = WebPPictureImportRGB(&webp, rgba, rgba_stride);
+    else
+      ok = 0;
+    if (!ok) {
+      fprintf(stderr, "libwebp framebuffer allocation failed!\n");
+      return false;
+    }
   }
   std::vector<uint8_t> mem;
   webp.custom_ptr = &mem;
   webp.writer = WebPWriter;
   if (!WebPEncode(&cfg, &webp)) {
     fprintf(stderr, "Error while encoding image\n");
+    if (islossless)
+      WebPPictureFree(&webp);
     return false;
   }
+  if (islossless)
+    WebPPictureFree(&webp);
 
   //bool withAlpha = (heif_image_get_chroma_format(image) == heif_chroma_interleaved_RGBA ||
   //    heif_image_get_chroma_format(image) == heif_chroma_interleaved_RRGGBBAA_BE); // BAD
@@ -150,7 +188,10 @@ bool WebpEncoder::Encode(const heif_image_handle* handle,
   WebPDataInit(&bitstream);
   bitstream.bytes = mem.data();
   bitstream.size = mem.size();
-  WebPMuxSetImage(mux, &bitstream, 0);
+  if (WebPMuxSetImage(mux, &bitstream, 0) != WEBP_MUX_OK) {
+    fprintf(stderr, "Error setting WEBP image\n");
+    return false;
+  }
 
   // --- write ICC profile
 
@@ -162,7 +203,9 @@ bool WebpEncoder::Encode(const heif_image_handle* handle,
         icc_bitstream.bytes = static_cast<uint8_t*>(malloc(icc_bitstream.size));
       heif_image_handle_get_raw_color_profile(handle, (void*)icc_bitstream.bytes);
       if (fix_icc_profile(icc_bitstream.bytes, icc_bitstream.size)) {
-        WebPMuxSetChunk(mux, "ICCP", &icc_bitstream, 1);
+        if (WebPMuxSetChunk(mux, "ICCP", &icc_bitstream, 1) != WEBP_MUX_OK) {
+          fprintf(stderr, "Error setting image ICC\n");
+        }
       }
       else {
         fprintf(stderr, "Invalid ICC profile. Writing PNG file without ICC.\n");
@@ -188,7 +231,9 @@ bool WebpEncoder::Encode(const heif_image_handle* handle,
           modify_exif_orientation_tag_if_it_exists(ptr, (int) size, 1);
           overwrite_exif_image_size_if_it_exists(ptr, (int) size, width, height);
 
-          WebPMuxSetChunk(mux, "EXIF", &exif_bitstream, 1);
+          if(WebPMuxSetChunk(mux, "EXIF", &exif_bitstream, 1) != WEBP_MUX_OK) {
+            fprintf(stderr, "Error setting image EXIF\n");
+          }
         }
       }
 
@@ -211,7 +256,9 @@ bool WebpEncoder::Encode(const heif_image_handle* handle,
       WebPDataInit(&xmp_bitstream);
       xmp_bitstream.bytes = xmp.data();
       xmp_bitstream.size = xmp.size();
-      WebPMuxSetChunk(mux, "XMP ", &xmp_bitstream, 1);
+      if(WebPMuxSetChunk(mux, "XMP ", &xmp_bitstream, 1) != WEBP_MUX_OK) {
+        fprintf(stderr, "Error setting image XMP\n");
+      }
     }
   }
 
@@ -223,6 +270,9 @@ bool WebpEncoder::Encode(const heif_image_handle* handle,
     return false;
   };
   std::unique_ptr<WebPData, void(*)(WebPData*)> webp_data_deleter(&webp_data, &WebPDataClear);
-  fwrite(webp_data.bytes, 1, webp_data.size, fp);
+  if (fwrite(webp_data.bytes, 1, webp_data.size, fp) != webp_data.size) {
+    fprintf(stderr, "Writing WEBP file failed\n");
+    return false;
+  }
   return true;
 }
