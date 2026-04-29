@@ -48,8 +48,12 @@ Op_YCbCr_to_RGB<Pixel>::state_after_conversion(const ColorState& input_state,
     return {};
   }
 
-  int matrix = input_state.nclx.get_matrix_coefficients();
-  if (matrix == 11 || matrix == 14) {
+  heif_matrix_coefficients matrix = input_state.nclx.get_matrix_coefficients();
+  // This is a linear transform, cannot handle nonlinear transforms
+  if (matrix == heif_matrix_coefficients_ITU_R_BT_2020_2_constant_luminance || matrix == heif_matrix_coefficients_chromaticity_derived_constant_luminance || matrix == heif_matrix_coefficients_ICtCp)
+    return {};
+  // If the parameters are known then it can be transformed (reject unknown matrix coefficients)
+  if (!get_YCbCr_to_RGB_coefficients(matrix, input_state.nclx.get_colour_primaries()).defined) {
     return {};
   }
 
@@ -80,6 +84,8 @@ Op_YCbCr_to_RGB<Pixel>::state_after_conversion(const ColorState& input_state,
   output_state.has_alpha = input_state.has_alpha;  // we simply keep the old alpha plane
   output_state.bits_per_pixel = input_state.bits_per_pixel;
   output_state.alpha_bits_per_pixel = input_state.alpha_bits_per_pixel;
+  output_state.nclx = input_state.nclx;
+  output_state.nclx.set_matrix_coefficients(heif_matrix_coefficients_RGB_GBR);
 
   states.emplace_back(output_state, SpeedCosts_Unoptimized);
 
@@ -315,9 +321,13 @@ Op_YCbCr420_to_RGB24::state_after_conversion(const ColorState& input_state,
     return {};
   }
 
-  int matrix = input_state.nclx.get_matrix_coefficients();
-  if (matrix == 0 || matrix == 8 || matrix == 11 || matrix == 14) {
-    return {};
+  heif_matrix_coefficients matrix = input_state.nclx.get_matrix_coefficients();
+  // This is a linear transform, cannot handle nonlinear transforms
+  if (matrix == heif_matrix_coefficients_ITU_R_BT_2020_2_constant_luminance || matrix == heif_matrix_coefficients_chromaticity_derived_constant_luminance || matrix == heif_matrix_coefficients_ICtCp)
+      return {};
+  // If the parameters are known then it can be transformed (reject unknown matrix coefficients)
+  if (!get_YCbCr_to_RGB_coefficients(matrix, input_state.nclx.get_colour_primaries()).defined) {
+      return {};
   }
   if (!input_state.nclx.get_full_range_flag()) {
     return {};
@@ -333,6 +343,8 @@ Op_YCbCr420_to_RGB24::state_after_conversion(const ColorState& input_state,
   output_state.chroma = heif_chroma_interleaved_RGB;
   output_state.has_alpha = false;
   output_state.bits_per_pixel = 8;
+  output_state.nclx = input_state.nclx;
+  output_state.nclx.set_matrix_coefficients(heif_matrix_coefficients_RGB_GBR);
 
   states.emplace_back(output_state, SpeedCosts_Unoptimized);
 
@@ -451,9 +463,13 @@ Op_YCbCr420_to_RGB32::state_after_conversion(const ColorState& input_state,
     return {};
   }
 
-  int matrix = input_state.nclx.get_matrix_coefficients();
-  if (matrix == 0 || matrix == 8 || matrix == 11 || matrix == 14) {
-    return {};
+  heif_matrix_coefficients matrix = input_state.nclx.get_matrix_coefficients();
+  // This is a linear transform, cannot handle nonlinear transforms
+  if (matrix == heif_matrix_coefficients_ITU_R_BT_2020_2_constant_luminance || matrix == heif_matrix_coefficients_chromaticity_derived_constant_luminance || matrix == heif_matrix_coefficients_ICtCp)
+      return {};
+  // If the parameters are known then it can be transformed (reject unknown matrix coefficients)
+  if (!get_YCbCr_to_RGB_coefficients(matrix, input_state.nclx.get_colour_primaries()).defined) {
+      return {};
   }
   if (!input_state.nclx.get_full_range_flag()) {
     return {};
@@ -469,6 +485,8 @@ Op_YCbCr420_to_RGB32::state_after_conversion(const ColorState& input_state,
   output_state.chroma = heif_chroma_interleaved_RGBA;
   output_state.has_alpha = true;
   output_state.bits_per_pixel = 8;
+  output_state.nclx = input_state.nclx;
+  output_state.nclx.set_matrix_coefficients(heif_matrix_coefficients_RGB_GBR);
 
   states.emplace_back(output_state, SpeedCosts_Unoptimized);
 
@@ -585,9 +603,13 @@ Op_YCbCr420_to_RRGGBBaa::state_after_conversion(const ColorState& input_state,
     return {};
   }
 
-  int matrix = input_state.nclx.get_matrix_coefficients();
-  if (matrix == 0 || matrix == 8 || matrix == 11 || matrix == 14) {
-    return {};
+  heif_matrix_coefficients matrix = input_state.nclx.get_matrix_coefficients();
+  // This is a linear transform, cannot handle nonlinear transforms
+  if (matrix == heif_matrix_coefficients_ITU_R_BT_2020_2_constant_luminance || matrix == heif_matrix_coefficients_chromaticity_derived_constant_luminance || matrix == heif_matrix_coefficients_ICtCp)
+      return {};
+  // If the parameters are known then it can be transformed (reject unknown matrix coefficients)
+  if (!get_YCbCr_to_RGB_coefficients(matrix, input_state.nclx.get_colour_primaries()).defined) {
+      return {};
   }
 
   std::vector<ColorStateWithCost> states;
@@ -601,6 +623,8 @@ Op_YCbCr420_to_RRGGBBaa::state_after_conversion(const ColorState& input_state,
                          heif_chroma_interleaved_RRGGBBAA_LE : heif_chroma_interleaved_RRGGBB_LE);
   output_state.has_alpha = input_state.has_alpha;
   output_state.bits_per_pixel = input_state.bits_per_pixel;
+  output_state.nclx = input_state.nclx;
+  output_state.nclx.set_matrix_coefficients(heif_matrix_coefficients_RGB_GBR);
 
   states.emplace_back(output_state, SpeedCosts_Unoptimized);
 
@@ -610,6 +634,8 @@ Op_YCbCr420_to_RRGGBBaa::state_after_conversion(const ColorState& input_state,
                          heif_chroma_interleaved_RRGGBBAA_BE : heif_chroma_interleaved_RRGGBB_BE);
   output_state.has_alpha = input_state.has_alpha;
   output_state.bits_per_pixel = input_state.bits_per_pixel;
+  output_state.nclx = input_state.nclx;
+  output_state.nclx.set_matrix_coefficients(heif_matrix_coefficients_RGB_GBR);
 
   states.emplace_back(output_state, SpeedCosts_Unoptimized);
 
