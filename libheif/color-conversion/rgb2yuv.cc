@@ -59,6 +59,9 @@ Op_RGB_to_YCbCr<Pixel>::state_after_conversion(const ColorState& input_state,
     return {};
   }
 
+  if (input_state.nclx.get_transfer_characteristics() != target_state.nclx.get_transfer_characteristics())
+    return {};
+
   std::vector<ColorStateWithCost> states;
 
   ColorState output_state;
@@ -340,7 +343,9 @@ Op_RRGGBBxx_HDR_to_YCbCr420::state_after_conversion(const ColorState& input_stat
   if (target_state.chroma != heif_chroma_420) {
     return {};
   }
-
+  
+  if (input_state.nclx.get_transfer_characteristics() != target_state.nclx.get_transfer_characteristics())
+    return {};
 
   std::vector<ColorStateWithCost> states;
 
@@ -514,7 +519,9 @@ Op_RGB24_32_to_YCbCr::state_after_conversion(const ColorState& input_state,
       return {};
     }
   }
-
+  
+  if (input_state.nclx.get_transfer_characteristics() != target_state.nclx.get_transfer_characteristics())
+    return {};
   // Note: no input alpha channel required. It will be filled up with 0xFF.
 
   if (input_state.colorspace != heif_colorspace_RGB ||
@@ -827,6 +834,9 @@ Op_RGB24_32_to_YCbCr444_GBR::state_after_conversion(const ColorState& input_stat
   if (!target_state.nclx.get_full_range_flag()) {
     return {};
   }
+  
+  if (input_state.nclx.get_transfer_characteristics() != target_state.nclx.get_transfer_characteristics())
+    return {};
 
   std::vector<ColorStateWithCost> states;
 
