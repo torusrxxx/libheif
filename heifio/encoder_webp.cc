@@ -169,9 +169,6 @@ bool WebpEncoder::Encode(const heif_image_handle* handle,
   if (islossless)
     WebPPictureFree(&webp);
 
-  //bool withAlpha = (heif_image_get_chroma_format(image) == heif_chroma_interleaved_RGBA ||
-  //    heif_image_get_chroma_format(image) == heif_chroma_interleaved_RRGGBBAA_BE); // BAD
-
   FILE* fp = fopen(filename.c_str(), "wb");
   if (!fp) {
     fprintf(stderr, "Can't open %s: %s\n", filename.c_str(), strerror(errno));
