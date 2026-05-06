@@ -348,8 +348,6 @@ void FreeExternalSystemMemorySurfacePool(mfxU8* dec_buf, mfxFrameSurface1* surfp
 /// https://intel.github.io/libvpl
 /// @file
 
-#define OUTPUT_FILE                "out.raw"
-#define BITSTREAM_BUFFER_SIZE      2000000
 #define MAJOR_API_VERSION_REQUIRED 2
 #define MINOR_API_VERSION_REQUIRED 2
 
@@ -398,10 +396,19 @@ struct intelvpl_decoder
   intelvpl_decoder_image_chain* images = NULL;
   intelvpl_decoder_image_chain* images_current = NULL;
   mfxVideoParam decodeParams = {};
+  mfxExtVideoSignalInfo nclx_info = {};
+  mfxExtContentLightLevelInfo cll_info = {};
+  mfxExtMasteringDisplayColourVolume mdcv_info = {};
   std::vector<uint8_t> data;
   intelvpl_decoder() {
       images = new intelvpl_decoder_image_chain();
       images_current = images;
+      nclx_info.Header.BufferId = MFX_EXTBUFF_VIDEO_SIGNAL_INFO;
+      nclx_info.Header.BufferSz = sizeof(nclx_info);
+      cll_info.Header.BufferId = MFX_EXTBUFF_CONTENT_LIGHT_LEVEL_INFO;
+      cll_info.Header.BufferSz = sizeof(cll_info);
+      mdcv_info.Header.BufferId = MFX_EXTBUFF_MASTERING_DISPLAY_COLOUR_VOLUME;
+      mdcv_info.Header.BufferSz = sizeof(mdcv_info);
   }
 };
 
@@ -771,6 +778,7 @@ static heif_chroma intelvpl_get_chroma_format(const mfxFrameInfo* info) {
     switch (info->FourCC) {
     case MFX_FOURCC_NV12:
     case MFX_FOURCC_I420:
+    case MFX_FOURCC_P010:
         return heif_chroma_420;
     case MFX_FOURCC_RGB4:
         return heif_chroma_interleaved_RGBA;
@@ -807,9 +815,14 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
         bs.Data = hevc_data;
         bs.MaxLength = hevc_data_size;
         bs.DataLength = hevc_data_size;
-        //nFrameReturned = dec.Decode(hevc_data, hevc_data_size);
         decoder->decodeParams.mfx.CodecId = MFX_CODEC_HEVC;
-        decoder->decodeParams.IOPattern = MFX_IOPATTERN_OUT_SYSTEM_MEMORY;
+        decoder->decodeParams.IOPattern = MFX_IOPATTERN_IN_SYSTEM_MEMORY | MFX_IOPATTERN_OUT_SYSTEM_MEMORY;
+        decoder->decodeParams.NumExtParam = 3;
+        mfxExtBuffer* extBuffer[3];
+        extBuffer[0] = (mfxExtBuffer*)&decoder->nclx_info;
+        extBuffer[1] = (mfxExtBuffer*)&decoder->cll_info;
+        extBuffer[2] = (mfxExtBuffer*)&decoder->mdcv_info;
+        decoder->decodeParams.ExtParam = extBuffer;
         sts = MFXVideoDECODE_DecodeHeader(session, &bs, &decoder->decodeParams);
         if (MFX_ERR_NONE != sts && MFX_ERR_MORE_DATA != sts) {
             return {
@@ -820,6 +833,7 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
         }
         if (MFX_ERR_NONE != sts)
             return err;
+        decoder->decodeParams.NumExtParam = 0;
         // input parameters finished, now initialize decode
         sts = MFXVideoDECODE_Init(session, &decoder->decodeParams);
         if (MFX_ERR_NONE != sts) {
@@ -962,13 +976,13 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
                     limits->max_image_size_pixels &&
                     limits->max_image_size_pixels / h < w) {
 
-                    std::stringstream sstr;
-                    sstr << "Allocating an image of size " << w << "x" << h << " exceeds the security limit of "
-                        << limits->max_image_size_pixels << " pixels";
+                    //std::stringstream sstr;
+                    //sstr << "Allocating an image of size " << w << "x" << h << " exceeds the security limit of "
+                    //    << limits->max_image_size_pixels << " pixels";
 
                     return { heif_error_Memory_allocation_error,
                             heif_suberror_Security_limit_exceeded,
-                            sstr.str().c_str()};
+                            ""}; // sstr.str().c_str()
                 }
                 //sts = WriteRawFrame_InternalMem(decoder->images->decSurfaceOut, sink);
 
@@ -1093,6 +1107,48 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
                         }
                     }
                         break;
+                    case MFX_FOURCC_P010: {
+                        // Y
+                        err = heif_image_add_plane_safe(*out_img, heif_channel_Y, w, h, 10, limits);
+                        if (err.code) {
+                            // copy error message to decoder object because heif_image will be released
+                            decoder->error_message = err.message;
+                            err.message = decoder->error_message.c_str();
+
+                            heif_image_release(*out_img);
+                            out_img = NULL;
+                            return err;
+                        }
+                        size_t dst_stride_Y;
+                        uint16_t* dst_mem_Y = (uint16_t *)heif_image_get_plane2(*out_img, heif_channel_Y, &dst_stride_Y);
+                        dst_stride_Y /= 2;
+
+                        pitch = data->PitchHigh << 16 | data->Pitch;
+                        for (int y = 0; y < h; y++) {
+                            for (int x = 0; x < w; x++) {
+                                dst_mem_Y[y * dst_stride_Y + x] = data->Y16[y * (pitch / 2) + x] >> 6;
+                            }
+                        }
+                        // UV
+                        h = (h + 1) / 2;
+                        w = (w + 1) / 2;
+                        err = heif_image_add_plane_safe(*out_img, heif_channel_Cb, w, h, 10, limits);
+                        size_t dst_stride_Cb;
+                        uint16_t* dst_mem_Cb = (uint16_t*)heif_image_get_plane2(*out_img, heif_channel_Cb, &dst_stride_Cb);
+                        err = heif_image_add_plane_safe(*out_img, heif_channel_Cr, w, h, 10, limits);
+                        size_t dst_stride_Cr;
+                        uint16_t* dst_mem_Cr = (uint16_t*)heif_image_get_plane2(*out_img, heif_channel_Cr, &dst_stride_Cr);
+                        dst_stride_Cb /= 2;
+                        dst_stride_Cr /= 2;
+                        pitch /= 2;
+                        for (int y = 0; y < h; y++) {
+                            for (int x = 0; x < w; x++) {
+                                dst_mem_Cb[y * dst_stride_Cb + x] = ((uint16_t*)data->UV)[y * pitch + x * 2] >> 6;
+                                dst_mem_Cr[y * dst_stride_Cr + x] = ((uint16_t*)data->UV)[y * pitch + x * 2 + 1] >> 6;
+                            }
+                        }
+                    }
+                                        break;
                     default:
                         return err;
                     }
@@ -1119,6 +1175,38 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
 
 
         } while (sts == MFX_WRN_IN_EXECUTION);
+        // Set NCLX
+        if (decoder->nclx_info.ColourDescriptionPresent) {
+            heif_color_profile_nclx* nclx = heif_nclx_color_profile_alloc();
+            heif_error nclx_err[3];
+            nclx->full_range_flag = !!decoder->nclx_info.VideoFullRange;
+            nclx_err[0] = heif_nclx_color_profile_set_color_primaries(nclx, decoder->nclx_info.ColourPrimaries);
+            nclx_err[1] = heif_nclx_color_profile_set_transfer_characteristics(nclx, decoder->nclx_info.TransferCharacteristics);
+            nclx_err[2] = heif_nclx_color_profile_set_matrix_coefficients(nclx, decoder->nclx_info.MatrixCoefficients);
+            if(nclx_err[0].code == heif_error_Ok && nclx_err[1].code == heif_error_Ok && nclx_err[2].code == heif_error_Ok)
+                heif_image_set_nclx_color_profile(*out_img, nclx);
+            heif_nclx_color_profile_free(nclx);
+        }
+        // Set Content Light Level
+        if (decoder->cll_info.InsertPayloadToggle == MFX_PAYLOAD_IDR) {
+            heif_content_light_level cll_inf;
+            cll_inf.max_content_light_level = decoder->cll_info.MaxContentLightLevel;
+            cll_inf.max_pic_average_light_level = decoder->cll_info.MaxPicAverageLightLevel;
+            heif_image_set_content_light_level(*out_img, &cll_inf);
+        }
+        // Set Mastering Display Colour Volume
+        if (decoder->mdcv_info.InsertPayloadToggle == MFX_PAYLOAD_IDR) {
+            heif_mastering_display_colour_volume mdcv_inf;
+            mdcv_inf.white_point_x = decoder->mdcv_info.WhitePointX;
+            mdcv_inf.white_point_y = decoder->mdcv_info.WhitePointY;
+            for (char rgb = 0; rgb < 3; rgb++) {
+                mdcv_inf.display_primaries_x[rgb] = decoder->mdcv_info.DisplayPrimariesX[rgb];
+                mdcv_inf.display_primaries_y[rgb] = decoder->mdcv_info.DisplayPrimariesY[rgb];
+            }
+            mdcv_inf.max_display_mastering_luminance = decoder->mdcv_info.MaxDisplayMasteringLuminance;
+            mdcv_inf.min_display_mastering_luminance = decoder->mdcv_info.MinDisplayMasteringLuminance;
+            heif_image_set_mastering_display_colour_volume(*out_img, &mdcv_inf);
+        }
         return { heif_error_Ok, heif_suberror_Unspecified, kSuccess };
     }
 else {
