@@ -397,7 +397,6 @@ struct intelvpl_decoder
   std::string error_message;
   intelvpl_decoder_image_chain* images = NULL;
   intelvpl_decoder_image_chain* images_current = NULL;
-  mfxSession session = NULL;
   mfxVideoParam decodeParams = {};
   std::vector<uint8_t> data;
   intelvpl_decoder() {
@@ -422,7 +421,8 @@ static const char* intelvpl_plugin_name()
   return plugin_name;
 }
 
-static mfxLoader loader = NULL; // !
+static mfxLoader loader = NULL;
+static mfxSession session = NULL;
 static void intelvpl_init_plugin()
 {
     // Initialize session
@@ -433,6 +433,10 @@ static void intelvpl_init_plugin()
 
 static void intelvpl_deinit_plugin()
 {
+    if (session) {
+        MFXClose(session);
+        session = NULL;
+    }
     if (loader) {
         MFXUnload(loader);
         loader = NULL;
@@ -455,16 +459,14 @@ static int intelvpl_does_support_format2(const heif_decoder_plugin_compressed_fo
   return intelvpl_does_support_format(format->format);
 }
 
-// Create a new decoder context for decoding an image
-heif_error intelvpl_new_decoder2(void** dec, const heif_decoder_plugin_options* options)
-{
-    intelvpl_decoder* decoder = new intelvpl_decoder();
-    heif_error err = { heif_error_Ok, heif_suberror_Unspecified, kSuccess };
-    mfxStatus sts;
+static heif_error intelvpl_init_session() {
+    if (session != NULL)
+        return { heif_error_Ok, heif_suberror_Unspecified, kSuccess };
+
     // variables used only in 2.x version
+    mfxStatus sts;
     mfxConfig cfg[3];
     mfxVariant cfgVal[3];
-    mfxVideoParam decodeParams = {};
     // Implementation used must be the type requested from command line
     cfg[0] = MFXCreateConfig(loader);
     if (NULL == cfg[0]) {
@@ -530,7 +532,7 @@ heif_error intelvpl_new_decoder2(void** dec, const heif_decoder_plugin_options* 
         };
     }
 
-    sts = MFXCreateSession(loader, 0, &decoder->session);
+    sts = MFXCreateSession(loader, 0, &session);
     if (MFX_ERR_NONE != sts) {
         return {
             heif_error_Decoder_plugin_error,
@@ -538,6 +540,16 @@ heif_error intelvpl_new_decoder2(void** dec, const heif_decoder_plugin_options* 
             "Cannot create session -- no implementations meet selection criteria"
         };
     }
+    return { heif_error_Ok, heif_suberror_Unspecified, kSuccess };
+}
+
+// Create a new decoder context for decoding an image
+heif_error intelvpl_new_decoder2(void** dec, const heif_decoder_plugin_options* options)
+{
+    heif_error err = intelvpl_init_session();
+    if (err.code)
+        return err;
+    intelvpl_decoder* decoder = new intelvpl_decoder();
     *dec = decoder;
     return err;
 }
@@ -565,8 +577,7 @@ static void intelvpl_free_decoder(void* decoder_raw)
         decoder->images = next;
     }
     mfxStatus sts;
-    sts = MFXVideoDECODE_Close(decoder->session);
-    sts = MFXClose(decoder->session);
+    MFXVideoDECODE_Close(session);
     delete decoder;
 }
 
@@ -799,7 +810,7 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
         //nFrameReturned = dec.Decode(hevc_data, hevc_data_size);
         decoder->decodeParams.mfx.CodecId = MFX_CODEC_HEVC;
         decoder->decodeParams.IOPattern = MFX_IOPATTERN_OUT_SYSTEM_MEMORY;
-        sts = MFXVideoDECODE_DecodeHeader(decoder->session, &bs, &decoder->decodeParams);
+        sts = MFXVideoDECODE_DecodeHeader(session, &bs, &decoder->decodeParams);
         if (MFX_ERR_NONE != sts && MFX_ERR_MORE_DATA != sts) {
             return {
               heif_error_Decoder_plugin_error,
@@ -810,7 +821,7 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
         if (MFX_ERR_NONE != sts)
             return err;
         // input parameters finished, now initialize decode
-        sts = MFXVideoDECODE_Init(decoder->session, &decoder->decodeParams);
+        sts = MFXVideoDECODE_Init(session, &decoder->decodeParams);
         if (MFX_ERR_NONE != sts) {
             return {
               heif_error_Decoder_plugin_error,
@@ -840,7 +851,7 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
                 ptr += intelvpl_buffer_max_size - bs.DataLength;
                 bs.DataLength = intelvpl_buffer_max_size;
             }*/
-            sts = MFXVideoDECODE_DecodeFrameAsync(decoder->session,
+            sts = MFXVideoDECODE_DecodeFrameAsync(session,
                 bs.DataLength == 0 ? NULL : &bs, //(isDraining) ? NULL : &bs,
                 NULL,
                 &decoder->images_current->decSurfaceOut,
