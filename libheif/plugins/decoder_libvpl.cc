@@ -45,7 +45,6 @@ enum {
 #endif
 
 #define WAIT_100_MILLISECONDS 100
-#define MAX_PATH              260
 #define MAX_WIDTH             3840
 #define MAX_HEIGHT            2160
 #define IS_ARG_EQ(a, b)       (!strcmp((a), (b)))
@@ -430,6 +429,7 @@ static const char* intelvpl_plugin_name()
 
 static mfxLoader loader = NULL;
 static mfxSession session = NULL;
+bool video_decode_initialized = false;
 static void intelvpl_init_plugin()
 {
     // Initialize session
@@ -441,8 +441,11 @@ static void intelvpl_init_plugin()
 static void intelvpl_deinit_plugin()
 {
     if (session) {
+        if (video_decode_initialized)
+            MFXVideoDECODE_Close(session);
         MFXClose(session);
         session = NULL;
+        video_decode_initialized = false;
     }
     if (loader) {
         MFXUnload(loader);
@@ -584,7 +587,7 @@ static void intelvpl_free_decoder(void* decoder_raw)
         decoder->images = next;
     }
     mfxStatus sts;
-    MFXVideoDECODE_Close(session);
+    //MFXVideoDECODE_Close(session);
     delete decoder;
 }
 
@@ -835,13 +838,16 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
             return err;
         decoder->decodeParams.NumExtParam = 0;
         // input parameters finished, now initialize decode
-        sts = MFXVideoDECODE_Init(session, &decoder->decodeParams);
-        if (MFX_ERR_NONE != sts) {
-            return {
-              heif_error_Decoder_plugin_error,
-              heif_suberror_End_of_data,
-              "Error initializing decode\n"
-            };
+        if (!video_decode_initialized) {
+            sts = MFXVideoDECODE_Init(session, &decoder->decodeParams);
+            if (MFX_ERR_NONE != sts) {
+                return {
+                  heif_error_Decoder_plugin_error,
+                  heif_suberror_End_of_data,
+                  "Error initializing decode\n"
+                };
+            }
+            video_decode_initialized = true;
         }
         decoder->initialized = true;
     }
@@ -922,6 +928,7 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
                 // output surface
                 break;
             case MFX_ERR_INCOMPATIBLE_VIDEO_PARAM:
+                // TODO: it reuses the same video decoder for all HEVC files, implement it
                 // The function detected that video parameters provided by the
                 // application are incompatible with initialization parameters. The
                 // application should close the component and then reinitialize it
