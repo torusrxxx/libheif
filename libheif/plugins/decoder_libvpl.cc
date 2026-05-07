@@ -47,292 +47,10 @@ enum {
 #define WAIT_100_MILLISECONDS 100
 #define MAX_WIDTH             3840
 #define MAX_HEIGHT            2160
-#define IS_ARG_EQ(a, b)       (!strcmp((a), (b)))
-
-#define VERIFY(x, y)       \
-    if (!(x)) {            \
-        printf("%s\n", y); \
-        isFailed = true;   \
-        goto end;          \
-    }
 
 #define ALIGN16(value)           (((value + 15) >> 4) << 4)
 #define ALIGN32(X)               (((mfxU32)((X) + 31)) & (~(mfxU32)31))
 #define VPLVERSION(major, minor) (major << 16 | minor)
-
-enum ExampleParams { PARAM_IMPL = 0, PARAM_INFILE, PARAM_INRES, PARAM_COUNT };
-enum ParamGroup {
-    PARAMS_CREATESESSION = 0,
-    PARAMS_DECODE,
-    PARAMS_ENCODE,
-    PARAMS_VPP,
-    PARAMS_TRANSCODE
-};
-
-typedef struct _Params {
-    char* infileName;
-    char* inmodelName;
-
-    mfxU16 srcWidth;
-    mfxU16 srcHeight;
-} Params;
-
-void* InitAcceleratorHandle(mfxSession session, int* fd) {
-    mfxIMPL impl;
-    mfxStatus sts = MFXQueryIMPL(session, &impl);
-    if (sts != MFX_ERR_NONE)
-        return NULL;
-
-#ifdef LIBVA_SUPPORT
-    if ((impl & MFX_IMPL_VIA_VAAPI) == MFX_IMPL_VIA_VAAPI) {
-        if (!fd)
-            return NULL;
-        VADisplay va_dpy = NULL;
-        // initialize VAAPI context and set session handle (req in Linux)
-        *fd = open("/dev/dri/renderD128", O_RDWR);
-        if (*fd >= 0) {
-            va_dpy = vaGetDisplayDRM(*fd);
-            if (va_dpy) {
-                int major_version = 0, minor_version = 0;
-                if (VA_STATUS_SUCCESS == vaInitialize(va_dpy, &major_version, &minor_version)) {
-                    MFXVideoCORE_SetHandle(session,
-                        static_cast<mfxHandleType>(MFX_HANDLE_VA_DISPLAY),
-                        va_dpy);
-                }
-            }
-        }
-        return va_dpy;
-    }
-#endif
-
-    return NULL;
-}
-
-void FreeAcceleratorHandle(void* accelHandle, int fd) {
-#ifdef LIBVA_SUPPORT
-    if (accelHandle) {
-        vaTerminate((VADisplay)accelHandle);
-    }
-    if (fd) {
-        close(fd);
-    }
-#endif
-}
-
-//Shows implementation info for Media SDK or Intel® VPL
-mfxVersion ShowImplInfo(mfxSession session) {
-    mfxIMPL impl;
-    mfxVersion version = { 0, 1 };
-
-    mfxStatus sts = MFXQueryIMPL(session, &impl);
-    if (sts != MFX_ERR_NONE)
-        return version;
-
-    sts = MFXQueryVersion(session, &version);
-    if (sts != MFX_ERR_NONE)
-        return version;
-
-    printf("Session loaded: ApiVersion = %d.%d \timpl= ", version.Major, version.Minor);
-
-    switch (impl) {
-    case MFX_IMPL_SOFTWARE:
-        puts("Software");
-        break;
-    case MFX_IMPL_HARDWARE | MFX_IMPL_VIA_VAAPI:
-        puts("Hardware:VAAPI");
-        break;
-    case MFX_IMPL_HARDWARE | MFX_IMPL_VIA_D3D11:
-        puts("Hardware:D3D11");
-        break;
-    case MFX_IMPL_HARDWARE | MFX_IMPL_VIA_D3D9:
-        puts("Hardware:D3D9");
-        break;
-    default:
-        puts("Unknown");
-        break;
-    }
-
-    return version;
-}
-
-// Shows implementation info with Intel® VPL
-void ShowImplementationInfo(mfxLoader loader, mfxU32 implnum) {
-    mfxImplDescription* idesc = nullptr;
-    mfxStatus sts;
-    //Loads info about implementation at specified list location
-    sts = MFXEnumImplementations(loader, implnum, MFX_IMPLCAPS_IMPLDESCSTRUCTURE, (mfxHDL*)&idesc);
-    if (!idesc || (sts != MFX_ERR_NONE))
-        return;
-
-    printf("Implementation details:\n");
-    printf("  ApiVersion:           %hu.%hu  \n", idesc->ApiVersion.Major, idesc->ApiVersion.Minor);
-    printf("  Implementation type:  HW\n");
-    printf("  AccelerationMode via: ");
-    switch (idesc->AccelerationMode) {
-    case MFX_ACCEL_MODE_NA:
-        printf("NA \n");
-        break;
-    case MFX_ACCEL_MODE_VIA_D3D9:
-        printf("D3D9\n");
-        break;
-    case MFX_ACCEL_MODE_VIA_D3D11:
-        printf("D3D11\n");
-        break;
-    case MFX_ACCEL_MODE_VIA_VAAPI:
-        printf("VAAPI\n");
-        break;
-    case MFX_ACCEL_MODE_VIA_VAAPI_DRM_MODESET:
-        printf("VAAPI_DRM_MODESET\n");
-        break;
-    case MFX_ACCEL_MODE_VIA_VAAPI_GLX:
-        printf("VAAPI_GLX\n");
-        break;
-    case MFX_ACCEL_MODE_VIA_VAAPI_X11:
-        printf("VAAPI_X11\n");
-        break;
-    case MFX_ACCEL_MODE_VIA_VAAPI_WAYLAND:
-        printf("VAAPI_WAYLAND\n");
-        break;
-    case MFX_ACCEL_MODE_VIA_HDDLUNITE:
-        printf("HDDLUNITE\n");
-        break;
-    default:
-        printf("unknown\n");
-        break;
-    }
-    printf("  DeviceID:             %s \n", idesc->Dev.DeviceID);
-    MFXDispReleaseImplDescription(loader, idesc);
-
-#if (MFX_VERSION >= 2004)
-    //Show implementation path, added in 2.4 API
-    mfxHDL implPath = nullptr;
-    sts = MFXEnumImplementations(loader, implnum, MFX_IMPLCAPS_IMPLPATH, &implPath);
-    if (!implPath || (sts != MFX_ERR_NONE))
-        return;
-
-    printf("  Path: %s\n\n", reinterpret_cast<mfxChar*>(implPath));
-    MFXDispReleaseImplDescription(loader, implPath);
-#endif
-}
-
-void PrepareFrameInfo(mfxFrameInfo* fi, mfxU32 format, mfxU16 w, mfxU16 h) {
-    // Video processing input data format
-    fi->FourCC = format;
-    fi->ChromaFormat = MFX_CHROMAFORMAT_YUV420;
-    fi->CropX = 0;
-    fi->CropY = 0;
-    fi->CropW = w;
-    fi->CropH = h;
-    fi->PicStruct = MFX_PICSTRUCT_PROGRESSIVE;
-    fi->FrameRateExtN = 30;
-    fi->FrameRateExtD = 1;
-    // width must be a multiple of 16
-    // height must be a multiple of 16 in case of frame picture and a multiple of 32 in case of field picture
-    fi->Width = ALIGN16(fi->CropW);
-    fi->Height =
-        (MFX_PICSTRUCT_PROGRESSIVE == fi->PicStruct) ? ALIGN16(fi->CropH) : ALIGN32(fi->CropH);
-}
-
-mfxU32 GetSurfaceSize(mfxU32 FourCC, mfxU32 width, mfxU32 height) {
-    mfxU32 nbytes = 0;
-
-    switch (FourCC) {
-    case MFX_FOURCC_I420:
-    case MFX_FOURCC_NV12:
-        nbytes = width * height + (width >> 1) * (height >> 1) + (width >> 1) * (height >> 1);
-        break;
-    case MFX_FOURCC_I010:
-    case MFX_FOURCC_P010:
-        nbytes = width * height + (width >> 1) * (height >> 1) + (width >> 1) * (height >> 1);
-        nbytes *= 2;
-        break;
-    case MFX_FOURCC_RGB4:
-    case MFX_FOURCC_BGR4:
-        nbytes = width * height * 4;
-        break;
-    default:
-        break;
-    }
-
-    return nbytes;
-}
-
-int GetFreeSurfaceIndex(mfxFrameSurface1* SurfacesPool, mfxU16 nPoolSize) {
-    for (mfxU16 i = 0; i < nPoolSize; i++) {
-        if (0 == SurfacesPool[i].Data.Locked)
-            return i;
-    }
-    return MFX_ERR_NOT_FOUND;
-}
-
-mfxStatus AllocateExternalSystemMemorySurfacePool(mfxU8** buf,
-    mfxFrameSurface1* surfpool,
-    mfxFrameInfo frame_info,
-    mfxU16 surfnum) {
-    // initialize surface pool (I420, RGB4 format)
-    mfxU32 surfaceSize = GetSurfaceSize(frame_info.FourCC, frame_info.Width, frame_info.Height);
-    if (!surfaceSize)
-        return MFX_ERR_MEMORY_ALLOC;
-
-    size_t framePoolBufSize = static_cast<size_t>(surfaceSize) * surfnum;
-    *buf = reinterpret_cast<mfxU8*>(calloc(framePoolBufSize, 1));
-
-    mfxU16 surfW;
-    mfxU16 surfH = frame_info.Height;
-
-    if (frame_info.FourCC == MFX_FOURCC_RGB4) {
-        surfW = frame_info.Width * 4;
-
-        for (mfxU32 i = 0; i < surfnum; i++) {
-            surfpool[i] = { 0 };
-            surfpool[i].Info = frame_info;
-            size_t buf_offset = static_cast<size_t>(i) * surfaceSize;
-            surfpool[i].Data.B = *buf + buf_offset;
-            surfpool[i].Data.G = surfpool[i].Data.B + 1;
-            surfpool[i].Data.R = surfpool[i].Data.B + 2;
-            surfpool[i].Data.A = surfpool[i].Data.B + 3;
-            surfpool[i].Data.Pitch = surfW;
-        }
-    }
-    else if (frame_info.FourCC == MFX_FOURCC_BGR4) {
-        surfW = frame_info.Width * 4;
-
-        for (mfxU32 i = 0; i < surfnum; i++) {
-            surfpool[i] = { 0 };
-            surfpool[i].Info = frame_info;
-            size_t buf_offset = static_cast<size_t>(i) * surfaceSize;
-            surfpool[i].Data.R = *buf + buf_offset;
-            surfpool[i].Data.G = surfpool[i].Data.R + 1;
-            surfpool[i].Data.B = surfpool[i].Data.R + 2;
-            surfpool[i].Data.A = surfpool[i].Data.R + 3;
-            surfpool[i].Data.Pitch = surfW;
-        }
-    }
-    else {
-        surfW = (frame_info.FourCC == MFX_FOURCC_P010) ? frame_info.Width * 2 : frame_info.Width;
-
-        for (mfxU32 i = 0; i < surfnum; i++) {
-            surfpool[i] = { 0 };
-            surfpool[i].Info = frame_info;
-            size_t buf_offset = static_cast<size_t>(i) * surfaceSize;
-            surfpool[i].Data.Y = *buf + buf_offset;
-            surfpool[i].Data.U = *buf + buf_offset + (surfW * surfH);
-            surfpool[i].Data.V = surfpool[i].Data.U + ((surfW / 2) * (surfH / 2));
-            surfpool[i].Data.Pitch = surfW;
-        }
-    }
-
-    return MFX_ERR_NONE;
-}
-
-void FreeExternalSystemMemorySurfacePool(mfxU8* dec_buf, mfxFrameSurface1* surfpool) {
-    if (dec_buf) {
-        free(dec_buf);
-    }
-
-    if (surfpool)
-        free(surfpool);
-}
 
 //==============================================================================
 // Copyright Intel Corporation
@@ -409,6 +127,22 @@ struct intelvpl_decoder
       mdcv_info.Header.BufferId = MFX_EXTBUFF_MASTERING_DISPLAY_COLOUR_VOLUME;
       mdcv_info.Header.BufferSz = sizeof(mdcv_info);
   }
+};
+
+class intelvpl_surface_mapper {
+    mfxFrameSurface1* surface;
+    mfxStatus sts;
+public:
+    intelvpl_surface_mapper(mfxFrameSurface1* surface, mfxMemoryFlags access) : surface(surface) {
+        sts = surface->FrameInterface->Map(surface, access);
+    }
+    mfxStatus status() const {
+        return sts;
+    }
+    ~intelvpl_surface_mapper() {
+        if(sts != MFX_ERR_NONE)
+            surface->FrameInterface->Unmap(surface);
+    }
 };
 
 static const char kEmptyString[] = "";
@@ -778,13 +512,17 @@ static heif_error intelvpl_flush_data(void* decoder_raw)
 }
 
 static heif_chroma intelvpl_get_chroma_format(const mfxFrameInfo* info) {
-    switch (info->FourCC) {
-    case MFX_FOURCC_NV12:
-    case MFX_FOURCC_I420:
-    case MFX_FOURCC_P010:
+    if(info->FourCC == 0)
+        return heif_chroma_undefined;
+    switch (info->ChromaFormat) {
+    case MFX_CHROMAFORMAT_MONOCHROME:
+        return heif_chroma_monochrome;
+    case MFX_CHROMAFORMAT_YUV420:
         return heif_chroma_420;
-    case MFX_FOURCC_RGB4:
-        return heif_chroma_interleaved_RGBA;
+    case MFX_CHROMAFORMAT_YUV422:
+        return heif_chroma_422;
+    case MFX_CHROMAFORMAT_YUV444:
+        return heif_chroma_444;
     default:
         return heif_chroma_undefined;
     }
@@ -849,114 +587,125 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
             }
             video_decode_initialized = true;
         }
+        //else {
+        //    MFXVideoDECODE_Close(session);
+        //    sts = MFXVideoDECODE_Init(session, &decoder->decodeParams);
+        //    if (MFX_ERR_NONE != sts) {
+        //        return {
+        //          heif_error_Decoder_plugin_error,
+        //          heif_suberror_End_of_data,
+        //          "Error initializing decode\n"
+        //        };
+        //    }
+        //}
         decoder->initialized = true;
     }
 
     bool setempty = false;
-        while (bs.DataLength > 0 || setempty) {
-            /*if (bs.DataLength > 0 && bs.DataOffset > 0) {
-                // Fix data offset to 0
-                memmove(bs.Data, bs.Data + bs.DataOffset, bs.DataLength);
+    while (bs.DataLength > 0 || setempty) {
+        /*if (bs.DataLength > 0 && bs.DataOffset > 0) {
+            // Fix data offset to 0
+            memmove(bs.Data, bs.Data + bs.DataOffset, bs.DataLength);
+        }
+        bs.DataOffset = 0;
+        if (bs.DataLength + remaining <= intelvpl_buffer_max_size) {
+            memcpy(bs.Data + bs.DataLength, ptr, remaining);
+            bs.DataLength += remaining;
+            ptr += remaining;
+            remaining = 0;
+        }
+        else {
+            memcpy(bs.Data + bs.DataLength, ptr, intelvpl_buffer_max_size - bs.DataLength);
+            remaining -= intelvpl_buffer_max_size - bs.DataLength;
+            ptr += intelvpl_buffer_max_size - bs.DataLength;
+            bs.DataLength = intelvpl_buffer_max_size;
+        }*/
+        sts = MFXVideoDECODE_DecodeFrameAsync(session,
+            bs.DataLength == 0 ? NULL : &bs, //(isDraining) ? NULL : &bs,
+            NULL,
+            &decoder->images_current->decSurfaceOut,
+            &decoder->images_current->syncp);
+        switch (sts) {
+        case MFX_ERR_NONE:
+            decoder->images_current->next = new intelvpl_decoder_image_chain();
+            if (decoder->images_current->next == NULL) {
+                return {
+                    heif_error_Decoder_plugin_error,
+                    heif_suberror_End_of_data,
+                    "new failure\n"
+                };
             }
-            bs.DataOffset = 0;
-            if (bs.DataLength + remaining <= intelvpl_buffer_max_size) {
-                memcpy(bs.Data + bs.DataLength, ptr, remaining);
-                bs.DataLength += remaining;
-                ptr += remaining;
-                remaining = 0;
+            decoder->images_current = decoder->images_current->next;
+            break;
+        case MFX_ERR_MORE_DATA:
+            // The function requires more bitstream at input before decoding can
+            // proceed
+            if (setempty == false && bs.DataLength == 0) {
+                setempty = true; // Needs one more MFXVideoDECODE_DecodeFrameAsync call with NULL bitstream
             }
             else {
-                memcpy(bs.Data + bs.DataLength, ptr, intelvpl_buffer_max_size - bs.DataLength);
-                remaining -= intelvpl_buffer_max_size - bs.DataLength;
-                ptr += intelvpl_buffer_max_size - bs.DataLength;
-                bs.DataLength = intelvpl_buffer_max_size;
-            }*/
-            sts = MFXVideoDECODE_DecodeFrameAsync(session,
-                bs.DataLength == 0 ? NULL : &bs, //(isDraining) ? NULL : &bs,
-                NULL,
-                &decoder->images_current->decSurfaceOut,
-                &decoder->images_current->syncp);
-            switch (sts) {
-            case MFX_ERR_NONE:
-                decoder->images_current->next = new intelvpl_decoder_image_chain();
-                if (decoder->images_current->next == NULL) {
-                    return {
-                      heif_error_Decoder_plugin_error,
-                      heif_suberror_End_of_data,
-                      "new failure\n"
-                    };
-                }
-                decoder->images_current = decoder->images_current->next;
-                break;
-            case MFX_ERR_MORE_DATA:
-                // The function requires more bitstream at input before decoding can
-                // proceed
-                if (setempty == false && bs.DataLength == 0) {
-                    setempty = true; // Needs one more MFXVideoDECODE_DecodeFrameAsync call with NULL bitstream
-                }
-                else {
-                    setempty = false;
-                }
-                break;
-            case MFX_ERR_MORE_SURFACE:
-                // The function requires more frame surface at output before decoding
-                // can proceed. This applies to external memory allocations and should
-                // not be expected for a simple internal allocation case like this
-                return {
-                  heif_error_Decoder_plugin_error,
-                  heif_suberror_End_of_data,
-                  "MFX_ERR_MORE_SURFACE\n"
-                };
-                break;
-            case MFX_ERR_DEVICE_LOST:
-                // For non-CPU implementations,
-                // Cleanup if device is lost
-                return {
-                  heif_error_Decoder_plugin_error,
-                  heif_suberror_End_of_data,
-                  "MFX_ERR_DEVICE_LOST\n"
-                };
-                break;
-            case MFX_WRN_DEVICE_BUSY:
-                // For non-CPU implementations,
-                // Wait a few milliseconds then try again
-                break;
-            case MFX_WRN_VIDEO_PARAM_CHANGED:
-                // The decoder detected a new sequence header in the bitstream.
-                // Video parameters may have changed.
-                // In external memory allocation case, might need to reallocate the
-                // output surface
-                break;
-            case MFX_ERR_INCOMPATIBLE_VIDEO_PARAM:
-                // TODO: it reuses the same video decoder for all HEVC files, implement it
-                // The function detected that video parameters provided by the
-                // application are incompatible with initialization parameters. The
-                // application should close the component and then reinitialize it
-                return {
-                  heif_error_Decoder_plugin_error,
-                  heif_suberror_End_of_data,
-                  "MFX_ERR_INCOMPATIBLE_VIDEO_PARAM\n"
-                };
-                break;
-            case MFX_ERR_REALLOC_SURFACE:
-                // Bigger surface_work required. May be returned only if
-                // mfxInfoMFX::EnableReallocRequest was set to ON during initialization.
-                // This applies to external memory allocations and should not be
-                // expected for a simple internal allocation case like this
-                return {
-                  heif_error_Decoder_plugin_error,
-                  heif_suberror_End_of_data,
-                  "MFX_ERR_REALLOC_SURFACE\n"
-                };
-                break;
-            default:
-                return {
-                  heif_error_Decoder_plugin_error,
-                  heif_suberror_End_of_data,
-                  "unknown status\n"
-                };
+                setempty = false;
             }
+            break;
+        case MFX_ERR_MORE_SURFACE:
+            // The function requires more frame surface at output before decoding
+            // can proceed. This applies to external memory allocations and should
+            // not be expected for a simple internal allocation case like this
+            return {
+                heif_error_Decoder_plugin_error,
+                heif_suberror_End_of_data,
+                "MFX_ERR_MORE_SURFACE\n"
+            };
+            break;
+        case MFX_ERR_DEVICE_LOST:
+            // For non-CPU implementations,
+            // Cleanup if device is lost
+            return {
+                heif_error_Decoder_plugin_error,
+                heif_suberror_End_of_data,
+                "MFX_ERR_DEVICE_LOST\n"
+            };
+            break;
+        case MFX_WRN_DEVICE_BUSY:
+            // For non-CPU implementations,
+            // Wait a few milliseconds then try again
+            break;
+        case MFX_WRN_VIDEO_PARAM_CHANGED:
+            // The decoder detected a new sequence header in the bitstream.
+            // Video parameters may have changed.
+            // In external memory allocation case, might need to reallocate the
+            // output surface
+            break;
+        case MFX_ERR_INCOMPATIBLE_VIDEO_PARAM:
+            // TODO: it reuses the same video decoder for all HEVC files, implement it
+            // The function detected that video parameters provided by the
+            // application are incompatible with initialization parameters. The
+            // application should close the component and then reinitialize it
+            return {
+                heif_error_Decoder_plugin_error,
+                heif_suberror_End_of_data,
+                "MFX_ERR_INCOMPATIBLE_VIDEO_PARAM\n"
+            };
+            break;
+        case MFX_ERR_REALLOC_SURFACE:
+            // Bigger surface_work required. May be returned only if
+            // mfxInfoMFX::EnableReallocRequest was set to ON during initialization.
+            // This applies to external memory allocations and should not be
+            // expected for a simple internal allocation case like this
+            return {
+                heif_error_Decoder_plugin_error,
+                heif_suberror_End_of_data,
+                "MFX_ERR_REALLOC_SURFACE\n"
+            };
+            break;
+        default:
+            return {
+                heif_error_Decoder_plugin_error,
+                heif_suberror_End_of_data,
+                "unknown status\n"
+            };
         }
+    }
 
     *out_img = nullptr;
     if (decoder->images != NULL && decoder->images->decSurfaceOut != NULL) {
@@ -979,6 +728,12 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
                     return err;
                 }
 
+                if (data->Corrupted != MFX_CORRUPTION_NO && data->Corrupted != MFX_CORRUPTION_MINOR) {
+                    return { heif_error_Invalid_input,
+                            heif_suberror_Decompression_invalid_data,
+                            "Bitstream is corrupted" };
+                }
+
                 if (limits &&
                     limits->max_image_size_pixels &&
                     limits->max_image_size_pixels / h < w) {
@@ -993,7 +748,8 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
                 }
                 //sts = WriteRawFrame_InternalMem(decoder->images->decSurfaceOut, sink);
 
-                mfxStatus sts = decoder->images->decSurfaceOut->FrameInterface->Map(decoder->images->decSurfaceOut, MFX_MAP_READ);
+                intelvpl_surface_mapper surfaceMap(decoder->images->decSurfaceOut, MFX_MAP_READ);
+                mfxStatus sts = surfaceMap.status();
                 if (sts != MFX_ERR_NONE) {
                     return err; // "mfxFrameSurfaceInterface->Map failed (%d)\n"
                 }
@@ -1011,33 +767,50 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
                     if (err.code) {
                         return err;
                     }
-                    switch (info->FourCC) {
-                    case MFX_FOURCC_NV12: {
-                        // Y
-                        err = heif_image_add_plane_safe(*out_img, heif_channel_Y, w, h, 8, limits);
-                        if (err.code) {
-                            // copy error message to decoder object because heif_image will be released
-                            decoder->error_message = err.message;
-                            err.message = decoder->error_message.c_str();
+                    // Y
+                    err = heif_image_add_plane_safe(*out_img, heif_channel_Y, w, h, info->BitDepthLuma, limits);
+                    if (err.code) {
+                        // copy error message to decoder object because heif_image will be released
+                        decoder->error_message = err.message;
+                        err.message = decoder->error_message.c_str();
 
-                            heif_image_release(*out_img);
-                            out_img = NULL;
-                            return err;
-                        }
+                        heif_image_release(*out_img);
+                        out_img = NULL;
+                        return err;
+                    }
+                    // Cb Cr
+                    switch (intelvpl_get_chroma_format(info)) {
+                    case heif_chroma_420:
+                        err = heif_image_add_plane_safe(*out_img, heif_channel_Cb, (w + 1) / 2, (h + 1) / 2, info->BitDepthChroma, limits);
+                        err = heif_image_add_plane_safe(*out_img, heif_channel_Cr, (w + 1) / 2, (h + 1) / 2, info->BitDepthChroma, limits);
+                        break;
+                    case heif_chroma_422:
+                        err = heif_image_add_plane_safe(*out_img, heif_channel_Cb, (w + 1) / 2, h, info->BitDepthChroma, limits);
+                        err = heif_image_add_plane_safe(*out_img, heif_channel_Cr, (w + 1) / 2, h, info->BitDepthChroma, limits);
+                        break;
+                    case heif_chroma_444:
+                        err = heif_image_add_plane_safe(*out_img, heif_channel_Cb, w, h, info->BitDepthChroma, limits);
+                        err = heif_image_add_plane_safe(*out_img, heif_channel_Cr, w, h, info->BitDepthChroma, limits);
+                        break;
+                    }
+                    pitch = data->PitchHigh << 16 | data->Pitch;
+                    switch (info->FourCC) {
+                    case MFX_FOURCC_NV12: { // YYYY....UVUV....
                         size_t dst_stride_Y;
                         uint8_t* dst_mem_Y = heif_image_get_plane2(*out_img, heif_channel_Y, &dst_stride_Y);
-
-                        pitch = data->PitchHigh << 16 | data->Pitch;
-                        for (int y = 0; y < h; y++) {
-                            memcpy(dst_mem_Y + y * dst_stride_Y, data->Y + y * pitch, w);
+                        if (dst_stride_Y == pitch) {
+                            memcpy(dst_mem_Y, data->Y, w* pitch);
+                        }
+                        else {
+                            for (int y = 0; y < h; y++) {
+                                memcpy(dst_mem_Y + y * dst_stride_Y, data->Y + y * pitch, w);
+                            }
                         }
                         // UV
                         h = (h + 1) / 2;
                         w = (w + 1) / 2;
-                        err = heif_image_add_plane_safe(*out_img, heif_channel_Cb, w, h, 8, limits);
                         size_t dst_stride_Cb;
                         uint8_t* dst_mem_Cb = heif_image_get_plane2(*out_img, heif_channel_Cb, &dst_stride_Cb);
-                        err = heif_image_add_plane_safe(*out_img, heif_channel_Cr, w, h, 8, limits);
                         size_t dst_stride_Cr;
                         uint8_t* dst_mem_Cr = heif_image_get_plane2(*out_img, heif_channel_Cr, &dst_stride_Cr);
                         for (int y = 0; y < h; y++) {
@@ -1048,89 +821,11 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
                         }
                     }
                         break;
-                    case MFX_FOURCC_I420: {
-                        // Y
-                        err = heif_image_add_plane_safe(*out_img, heif_channel_Y, w, h, 8, limits);
-                        if (err.code) {
-                            // copy error message to decoder object because heif_image will be released
-                            decoder->error_message = err.message;
-                            err.message = decoder->error_message.c_str();
-
-                            heif_image_release(*out_img);
-                            out_img = NULL;
-                            return err;
-                        }
-                        size_t dst_stride_Y;
-                        uint8_t* dst_mem_Y = heif_image_get_plane2(*out_img, heif_channel_Y, &dst_stride_Y);
-
-                        pitch = data->Pitch;
-                        for (int y = 0; y < h; y++) {
-                            memcpy(dst_mem_Y + y * dst_stride_Y, data->Y + y * pitch, w);
-                        }
-                        // U
-                        h /= 2;
-                        pitch /= 2;
-                        err = heif_image_add_plane_safe(*out_img, heif_channel_Cb, w, h, 8, limits);
-                        size_t dst_stride_Cb;
-                        uint8_t* dst_mem_Cb = heif_image_get_plane2(*out_img, heif_channel_Cb, &dst_stride_Cb);
-                        for (int y = 0; y < h; y++) {
-                            for (int x = 0; x < w / 2; x++) {
-                                dst_mem_Cb[y * dst_stride_Cb + x] = data->U[y * pitch + x];
-                            }
-                        }
-                        err = heif_image_add_plane_safe(*out_img, heif_channel_Cr, w, h, 8, limits);
-                        size_t dst_stride_Cr;
-                        uint8_t* dst_mem_Cr = heif_image_get_plane2(*out_img, heif_channel_Cr, &dst_stride_Cr);
-                        for (int y = 0; y < h; y++) {
-                            for (int x = 0; x < w / 2; x++) {
-                                dst_mem_Cr[y * dst_stride_Cr + x] = data->V[y * pitch + x];
-                            }
-                        }
-                    }
-                        break;
-                    case MFX_FOURCC_RGB4: {
-                        // R
-                        err = heif_image_add_plane_safe(*out_img, heif_channel_interleaved, w, h, 8, limits);
-                        if (err.code) {
-                            // copy error message to decoder object because heif_image will be released
-                            decoder->error_message = err.message;
-                            err.message = decoder->error_message.c_str();
-
-                            heif_image_release(*out_img);
-                            out_img = NULL;
-                            return err;
-                        }
-                        size_t dst_stride;
-                        uint8_t* dst_mem = heif_image_get_plane2(*out_img, heif_channel_interleaved, &dst_stride);
-                        pitch = data->Pitch;
-                        for (int y = 0; y < h; y++) {
-                            for (int x = 0; x < w; x++) {
-                                //bytes_read = fread(data->B + i * pitch, 1, pitch, f);
-                                dst_mem[y * dst_stride + x * 4 + 0] = data->B[y * pitch + x * 4 + 2]; // R
-                                dst_mem[y * dst_stride + x * 4 + 1] = data->B[y * pitch + x * 4 + 1]; // G
-                                dst_mem[y * dst_stride + x * 4 + 2] = data->B[y * pitch + x * 4 + 0]; // B
-                                dst_mem[y * dst_stride + x * 4 + 3] = data->B[y * pitch + x * 4 + 3]; // A
-                            }
-                        }
-                    }
-                        break;
-                    case MFX_FOURCC_P010: {
-                        // Y
-                        err = heif_image_add_plane_safe(*out_img, heif_channel_Y, w, h, 10, limits);
-                        if (err.code) {
-                            // copy error message to decoder object because heif_image will be released
-                            decoder->error_message = err.message;
-                            err.message = decoder->error_message.c_str();
-
-                            heif_image_release(*out_img);
-                            out_img = NULL;
-                            return err;
-                        }
+                    case MFX_FOURCC_P010: { // YYYY....UVUV....
                         size_t dst_stride_Y;
                         uint16_t* dst_mem_Y = (uint16_t *)heif_image_get_plane2(*out_img, heif_channel_Y, &dst_stride_Y);
                         dst_stride_Y /= 2;
 
-                        pitch = data->PitchHigh << 16 | data->Pitch;
                         for (int y = 0; y < h; y++) {
                             for (int x = 0; x < w; x++) {
                                 dst_mem_Y[y * dst_stride_Y + x] = data->Y16[y * (pitch / 2) + x] >> 6;
@@ -1139,10 +834,8 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
                         // UV
                         h = (h + 1) / 2;
                         w = (w + 1) / 2;
-                        err = heif_image_add_plane_safe(*out_img, heif_channel_Cb, w, h, 10, limits);
                         size_t dst_stride_Cb;
                         uint16_t* dst_mem_Cb = (uint16_t*)heif_image_get_plane2(*out_img, heif_channel_Cb, &dst_stride_Cb);
-                        err = heif_image_add_plane_safe(*out_img, heif_channel_Cr, w, h, 10, limits);
                         size_t dst_stride_Cr;
                         uint16_t* dst_mem_Cr = (uint16_t*)heif_image_get_plane2(*out_img, heif_channel_Cr, &dst_stride_Cr);
                         dst_stride_Cb /= 2;
@@ -1156,16 +849,52 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
                         }
                     }
                                         break;
+                    case MFX_FOURCC_YUY2: { // YUYV YUYV ....
+                        size_t dst_stride_Cb;
+                        uint8_t* dst_mem_Cb = (uint8_t*)heif_image_get_plane2(*out_img, heif_channel_Cb, &dst_stride_Cb);
+                        size_t dst_stride_Cr;
+                        uint8_t* dst_mem_Cr = (uint8_t*)heif_image_get_plane2(*out_img, heif_channel_Cr, &dst_stride_Cr);
+                        size_t dst_stride_Y;
+                        uint8_t* dst_mem_Y = (uint8_t*)heif_image_get_plane2(*out_img, heif_channel_Y, &dst_stride_Y);
+
+                        for (int y = 0; y < h; y++) {
+                            for (int x = 0; x < (w + 1) / 2; x++) {
+                                dst_mem_Y[y * dst_stride_Y + x * 2] = data->Y[y * pitch + x * 4];
+                                dst_mem_Cb[y * dst_stride_Cb + x] = data->Y[y * pitch + x * 4 + 1];
+                                if (x * 2 + 1 < w)
+                                    dst_mem_Y[y * dst_stride_Y + x * 2 + 1] = data->Y[y * pitch + x * 4 + 2];
+                                dst_mem_Cr[y * dst_stride_Cr + x] = data->Y[y * pitch + x * 4 + 3];
+                            }
+                        }
+                    }
+                                        break;
+                    case MFX_FOURCC_Y210: { // YUYV YUYV ....
+                        size_t dst_stride_Cb;
+                        uint16_t* dst_mem_Cb = (uint16_t*)heif_image_get_plane2(*out_img, heif_channel_Cb, &dst_stride_Cb);
+                        size_t dst_stride_Cr;
+                        uint16_t* dst_mem_Cr = (uint16_t*)heif_image_get_plane2(*out_img, heif_channel_Cr, &dst_stride_Cr);
+                        size_t dst_stride_Y;
+                        uint16_t* dst_mem_Y = (uint16_t*)heif_image_get_plane2(*out_img, heif_channel_Y, &dst_stride_Y);
+                        dst_stride_Cb /= 2;
+                        dst_stride_Cr /= 2;
+                        dst_stride_Y /= 2;
+
+                        pitch /= 2;
+                        for (int y = 0; y < h; y++) {
+                            for (int x = 0; x < (w + 1) / 2; x++) {
+                                dst_mem_Y[y * dst_stride_Y + x * 2] = data->Y16[y * pitch + x * 4] >> 6;
+                                dst_mem_Cb[y * dst_stride_Cb + x] = data->Y16[y * pitch + x * 4 + 1] >> 6;
+                                if(x * 2 + 1 < w)
+                                    dst_mem_Y[y * dst_stride_Y + x * 2 + 1] = data->Y16[y * pitch + x * 4 + 2] >> 6;
+                                dst_mem_Cr[y * dst_stride_Cr + x] = data->Y16[y * pitch + x * 4 + 3] >> 6;
+                            }
+                        }
+                    }
+                                        break;
                     default:
                         return err;
                     }
                 }
-
-                sts = decoder->images->decSurfaceOut->FrameInterface->Unmap(decoder->images->decSurfaceOut);
-                if (sts != MFX_ERR_NONE) {
-                    return err; //"mfxFrameSurfaceInterface->Unmap failed (%d)\n"
-                }
-
             }
 
             if (sts != MFX_WRN_IN_EXECUTION) {
