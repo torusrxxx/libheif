@@ -296,6 +296,9 @@ static int intelvpl_does_support_format(heif_compression_format format)
   else if (format == heif_compression_AV1) {
     return INTELVPL_PLUGIN_PRIORITY; // TODO: AV1 High Profile 4:4:4 not supported
   }
+  else if (format == heif_compression_AVC) {
+    return INTELVPL_PLUGIN_PRIORITY;
+  }
   else {
     return 0;
   }
@@ -421,6 +424,9 @@ heif_error intelvpl_new_decoder2(void** dec, const heif_decoder_plugin_options* 
     break;
   case heif_compression_AV1:
     codecId = MFX_CODEC_AV1;
+    break;
+  case heif_compression_AVC:
+    codecId = MFX_CODEC_AVC;
     break;
   default:
     codecId = 0;
@@ -686,7 +692,7 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
   std::unique_ptr<uint8_t, void(*)(void*)> hevc_data_free(hevc_data, _aligned_free);
   size_t hevc_data_size;
   if (!decoder->initialized) {
-    if (decoder->decodeParams.mfx.CodecId == MFX_CODEC_HEVC) {
+    if (decoder->decodeParams.mfx.CodecId == MFX_CODEC_HEVC || decoder->decodeParams.mfx.CodecId == MFX_CODEC_AVC) {
       /*NalMap nalus;
       err = nalus.parseHevcNalu(decoder->data.data(), decoder->data.size());
       if (err.code != heif_error_Ok) {
