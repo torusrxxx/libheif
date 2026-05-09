@@ -23,7 +23,8 @@
 
 #include "common_utils.h"
 
-const struct heif_encoder_plugin* get_encoder_plugin_libvpl();
+const struct heif_encoder_plugin* get_encoder_plugin_libvpl_HEVC();
+const struct heif_encoder_plugin* get_encoder_plugin_libvpl_AVC();
 
 #if PLUGIN_LIBVPL
 extern "C" {
