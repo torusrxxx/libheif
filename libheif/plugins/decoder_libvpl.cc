@@ -257,13 +257,15 @@ static const char* intelvpl_plugin_name()
   return plugin_name;
 }
 
-static mfxLoader loader = NULL;
-static mfxSession session = NULL;
+mfxLoader loader = NULL;
+mfxSession session = NULL;
 bool video_decode_initialized = false;
+extern bool video_encode_initialized;
 static void intelvpl_init_plugin()
 {
     // Initialize session
-    loader = MFXLoad();
+    if (!loader)
+        loader = MFXLoad();
     if (!loader)
         return;
 }
@@ -271,13 +273,16 @@ static void intelvpl_init_plugin()
 static void intelvpl_deinit_plugin()
 {
     if (session) {
-        if (video_decode_initialized)
+        if (video_decode_initialized) {
             MFXVideoDECODE_Close(session);
-        MFXClose(session);
-        session = NULL;
-        video_decode_initialized = false;
+            video_decode_initialized = false;
+        }
+        if (!video_encode_initialized) {
+            MFXClose(session);
+            session = NULL;
+        }
     }
-    if (loader) {
+    if (loader && !session) {
         MFXUnload(loader);
         loader = NULL;
     }
@@ -1073,10 +1078,18 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
                         size_t dst_stride_Y;
                         uint16_t* dst_mem_Y = (uint16_t *)heif_image_get_plane2(*out_img, heif_channel_Y, &dst_stride_Y);
                         dst_stride_Y /= 2;
-
-                        for (int y = 0; y < h; y++) {
-                            for (int x = 0; x < w; x++) {
-                                dst_mem_Y[y * dst_stride_Y + x] = data->Y16[y * (pitch / 2) + x] >> 6;
+                        if (info->Shift == 0) {
+                            for (int y = 0; y < h; y++) {
+                                for (int x = 0; x < w; x++) {
+                                    dst_mem_Y[y * dst_stride_Y + x] = data->Y16[y * (pitch / 2) + x];
+                                }
+                            }
+                        }
+                        else {
+                            for (int y = 0; y < h; y++) {
+                                for (int x = 0; x < w; x++) {
+                                    dst_mem_Y[y * dst_stride_Y + x] = data->Y16[y * (pitch / 2) + x] >> 6;
+                                }
                             }
                         }
                         // UV
@@ -1089,10 +1102,20 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
                         dst_stride_Cb /= 2;
                         dst_stride_Cr /= 2;
                         pitch /= 2;
-                        for (int y = 0; y < h; y++) {
-                            for (int x = 0; x < w; x++) {
-                                dst_mem_Cb[y * dst_stride_Cb + x] = ((uint16_t*)data->UV)[y * pitch + x * 2] >> 6;
-                                dst_mem_Cr[y * dst_stride_Cr + x] = ((uint16_t*)data->UV)[y * pitch + x * 2 + 1] >> 6;
+                        if (info->Shift == 0) {
+                            for (int y = 0; y < h; y++) {
+                                for (int x = 0; x < w; x++) {
+                                    dst_mem_Cb[y * dst_stride_Cb + x] = ((uint16_t*)data->UV)[y * pitch + x * 2];
+                                    dst_mem_Cr[y * dst_stride_Cr + x] = ((uint16_t*)data->UV)[y * pitch + x * 2 + 1];
+                                }
+                            }
+                        }
+                        else {
+                            for (int y = 0; y < h; y++) {
+                                for (int x = 0; x < w; x++) {
+                                    dst_mem_Cb[y * dst_stride_Cb + x] = ((uint16_t*)data->UV)[y * pitch + x * 2] >> 6;
+                                    dst_mem_Cr[y * dst_stride_Cr + x] = ((uint16_t*)data->UV)[y * pitch + x * 2 + 1] >> 6;
+                                }
                             }
                         }
                     }
