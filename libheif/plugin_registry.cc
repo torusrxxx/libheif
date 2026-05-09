@@ -240,7 +240,8 @@ void register_default_plugins()
 #endif
 
 #if HAVE_LIBVPL_DECODER
-  register_encoder(get_encoder_plugin_libvpl());
+  register_encoder(get_encoder_plugin_libvpl_HEVC());
+  register_encoder(get_encoder_plugin_libvpl_AVC());
 #endif
 
 #if WITH_UNCOMPRESSED_CODEC
