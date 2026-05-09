@@ -95,6 +95,7 @@ struct intelvpl_encoder
 {
   bool initialized = false;
   mfxVideoParam encodeParams = {};
+  mfxU32 codecId = 0;
 
   // --- output
 
@@ -144,10 +145,16 @@ static const int INTELVPL_PLUGIN_PRIORITY = 100;
 static char plugin_name[MAX_PLUGIN_NAME_LENGTH];
 
 
-static const char* intelvpl_plugin_name()
+static const char* intelvpl_HEVC_plugin_name()
 {
   strcpy(plugin_name, "Intel QSV HEVC encoder");
   return plugin_name;
+}
+
+static const char* intelvpl_AVC_plugin_name()
+{
+    strcpy(plugin_name, "Intel QSV AVC encoder");
+    return plugin_name;
 }
 
 extern mfxLoader loader;
@@ -235,7 +242,7 @@ void intelvpl_query_encoded_size(void* encoder_raw, uint32_t input_width, uint32
   *encoded_height = (input_height + 7) & ~0x7U;
 }
 
-static heif_error intelvpl_init_session() {
+static heif_error intelvpl_init_session(mfxU32 codecId) {
   if (session != NULL)
     return { heif_error_Ok, heif_suberror_Unspecified, kSuccess };
 
@@ -273,7 +280,7 @@ static heif_error intelvpl_init_session() {
     };
   }
   cfgVal[1].Type = MFX_VARIANT_TYPE_U32;
-  cfgVal[1].Data.U32 = MFX_CODEC_HEVC;
+  cfgVal[1].Data.U32 = codecId;
   sts = MFXSetConfigFilterProperty(
     cfg[1],
     (mfxU8*)"mfxImplDescription.mfxEncoderDescription.encoder.CodecID",
@@ -321,15 +328,26 @@ static heif_error intelvpl_init_session() {
 
 // Create a new encoder context for encoding an image
 
-static heif_error intelvpl_new_encoder(void** enc)
+static heif_error intelvpl_new_encoder(mfxU32 codecId, void** enc)
 {
-  heif_error err = intelvpl_init_session();
+  heif_error err = intelvpl_init_session(codecId);
   if (err.code)
     return err;
   intelvpl_encoder* encoder = new intelvpl_encoder();
+  encoder->codecId = codecId;
   *enc = encoder;
 
   return err;
+}
+
+static heif_error intelvpl_new_encoder_HEVC(void** enc)
+{
+  return intelvpl_new_encoder(MFX_CODEC_HEVC, enc);
+}
+
+static heif_error intelvpl_new_encoder_AVC(void** enc)
+{
+  return intelvpl_new_encoder(MFX_CODEC_AVC, enc);
 }
 
 static void intelvpl_free_encoder(void* encoder_raw)
@@ -416,7 +434,7 @@ static heif_error intelvpl_start_sequence_encoding_intern(void* encoder_raw, con
 
   // Initialize encode parameters
   mfxVideoParam encodeParams = {};
-  encodeParams.mfx.CodecId = MFX_CODEC_HEVC;
+  encodeParams.mfx.CodecId = encoder->codecId;
   encodeParams.mfx.TargetUsage = MFX_TARGETUSAGE_BALANCED;
   if (options && options->keyframe_distance_max) {
     encodeParams.mfx.GopPicSize = options->keyframe_distance_max;
@@ -979,10 +997,10 @@ static const heif_encoder_plugin encoder_libvpl_HEVC
   /* priority */ INTELVPL_PLUGIN_PRIORITY,
   /* supports_lossy_compression */ true,
   /* supports_lossless_compression */ false,
-  /* get_plugin_name */ intelvpl_plugin_name,
+  /* get_plugin_name */ intelvpl_HEVC_plugin_name,
   /* init_plugin */ intelvpl_init_plugin,
   /* cleanup_plugin */ intelvpl_cleanup_plugin,
-  /* new_encoder */ intelvpl_new_encoder,
+  /* new_encoder */ intelvpl_new_encoder_HEVC,
   /* free_encoder */ intelvpl_free_encoder,
   /* set_parameter_quality */ intelvpl_set_parameter_quality,
   /* get_parameter_quality */ intelvpl_get_parameter_quality,
@@ -1010,11 +1028,54 @@ static const heif_encoder_plugin encoder_libvpl_HEVC
   /* does_indicate_keyframes (v4) */ 0
 };
 
-const heif_encoder_plugin* get_encoder_plugin_libvpl()
+const heif_encoder_plugin* get_encoder_plugin_libvpl_HEVC()
 {
   return &encoder_libvpl_HEVC;
 }
 
+static const heif_encoder_plugin encoder_libvpl_AVC
+{
+    /* plugin_api_version */ 4,
+    /* compression_format */ heif_compression_AVC,
+    /* id_name */ "h264_qsv",
+    /* priority */ INTELVPL_PLUGIN_PRIORITY,
+    /* supports_lossy_compression */ true,
+    /* supports_lossless_compression */ false,
+    /* get_plugin_name */ intelvpl_AVC_plugin_name,
+    /* init_plugin */ intelvpl_init_plugin,
+    /* cleanup_plugin */ intelvpl_cleanup_plugin,
+    /* new_encoder */ intelvpl_new_encoder_AVC,
+    /* free_encoder */ intelvpl_free_encoder,
+    /* set_parameter_quality */ intelvpl_set_parameter_quality,
+    /* get_parameter_quality */ intelvpl_get_parameter_quality,
+    /* set_parameter_lossless */ intelvpl_set_parameter_lossless,
+    /* get_parameter_lossless */ intelvpl_get_parameter_lossless,
+    /* set_parameter_logging_level */ intelvpl_set_parameter_logging_level,
+    /* get_parameter_logging_level */ intelvpl_get_parameter_logging_level,
+    /* list_parameters */ intelvpl_list_parameters,
+    /* set_parameter_integer */ intelvpl_set_parameter_integer,
+    /* get_parameter_integer */ intelvpl_get_parameter_integer,
+    /* set_parameter_boolean */ intelvpl_set_parameter_integer, // boolean also maps to integer function
+    /* get_parameter_boolean */ intelvpl_get_parameter_integer, // boolean also maps to integer function
+    /* set_parameter_string */ intelvpl_set_parameter_string,
+    /* get_parameter_string */ intelvpl_get_parameter_string,
+    /* query_input_colorspace */ intelvpl_query_input_colorspace,
+    /* encode_image */ intelvpl_encode_image,
+    /* get_compressed_data */ intelvpl_get_compressed_data,
+    /* query_input_colorspace (v2) */ intelvpl_query_input_colorspace2,
+    /* query_encoded_size (v3) */ intelvpl_query_encoded_size,
+    /* minimum_required_libheif_version */ LIBHEIF_MAKE_VERSION(1,21,0),
+    /* start_sequence_encoding (v4) */ intelvpl_start_sequence_encoding,
+    /* encode_sequence_frame (v4) */ intelvpl_encode_sequence_frame,
+    /* end_sequence_encoding (v4) */ intelvpl_end_sequence_encoding,
+    /* get_compressed_data2 (v4) */ intelvpl_get_compressed_data2,
+    /* does_indicate_keyframes (v4) */ 0
+};
+
+const heif_encoder_plugin* get_encoder_plugin_libvpl_AVC()
+{
+    return &encoder_libvpl_AVC;
+}
 
 
 #if PLUGIN_INTELVPL
