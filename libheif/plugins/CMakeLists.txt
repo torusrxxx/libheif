@@ -125,6 +125,10 @@ set(LIBVPL_DECODER_sources decoder_libvpl.cc decoder_libvpl.h)
 set(LIBVPL_DECODER_extra_plugin_sources)
 plugin_compilation(libvpl VPL VPL_FOUND LIBVPL_DECODER LIBVPL_DECODER)
 
+set(LIBVPL_ENCODER_sources encoder_libvpl.cc encoder_libvpl.h)
+set(LIBVPL_ENCODER_extra_plugin_sources)
+plugin_compilation(libvpl VPL VPL_FOUND LIBVPL_ENCODER LIBVPL_ENCODER)
+
 target_sources(heif PRIVATE
                encoder_mask.h
                encoder_mask.cc

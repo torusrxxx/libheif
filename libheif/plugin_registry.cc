@@ -110,6 +110,10 @@
 #include "plugins/decoder_libvpl.h"
 #endif
 
+#if HAVE_LIBVPL_ENCODER
+#include "plugins/encoder_libvpl.h"
+#endif
+
 #include "plugins/encoder_mask.h"
 
 #if HAVE_OPENJPH_ENCODER
@@ -233,6 +237,10 @@ void register_default_plugins()
 
 #if HAVE_LIBVPL_DECODER
   register_decoder(get_decoder_plugin_libvpl());
+#endif
+
+#if HAVE_LIBVPL_DECODER
+  register_encoder(get_encoder_plugin_libvpl());
 #endif
 
 #if WITH_UNCOMPRESSED_CODEC
