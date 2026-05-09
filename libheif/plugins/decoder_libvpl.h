@@ -27,7 +27,7 @@ const struct heif_decoder_plugin* get_decoder_plugin_libvpl();
 
 #if PLUGIN_LIBVPL
 extern "C" {
-MAYBE_UNUSED LIBHEIF_API extern heif_plugin_info plugin_info;
+  MAYBE_UNUSED LIBHEIF_API extern heif_plugin_info plugin_info;
 }
 #endif
 
