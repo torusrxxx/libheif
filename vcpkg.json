@@ -6,7 +6,6 @@
     "libde265",
     "libjpeg-turbo",
     "libpng",
-    "tiff",
-    "x265"
+    "tiff"
   ]
 }

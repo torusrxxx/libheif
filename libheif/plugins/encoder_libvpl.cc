@@ -10,10 +10,6 @@
 ///
 /// @file
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #ifdef USE_MEDIASDK1
 #include "mfxvideo.h"
 enum {
@@ -84,8 +80,6 @@ enum {
 #include "libheif/heif_plugin.h"
 #include "encoder_libvpl.h"
 #include <cassert>
-#include <memory>
-#include <cstring>
 #include <string>
 #include <deque>
 
@@ -116,7 +110,7 @@ struct intelvpl_encoder
   std::vector<uint8_t> alldata;
 
   intelvpl_encoder() {
-    bitstream.MaxLength = 1 << 10; // TODO
+    bitstream.MaxLength = 1 << 20; // TODO
     alldata.resize(bitstream.MaxLength);
     bitstream.Data = alldata.data();
     memset(bitstream.Data, 0, bitstream.MaxLength);
@@ -153,6 +147,11 @@ static const char* intelvpl_AVC_plugin_name()
 static const char* intelvpl_AV1_plugin_name()
 {
   return "Intel QSV AV1 encoder";
+}
+
+static const char* intelvpl_JPEG_plugin_name()
+{
+    return "Intel QSV JPEG encoder";
 }
 
 extern mfxLoader loader;
@@ -353,6 +352,11 @@ static heif_error intelvpl_new_encoder_AV1(void** enc)
     return intelvpl_new_encoder(MFX_CODEC_AV1, enc);
 }
 
+static heif_error intelvpl_new_encoder_JPEG(void** enc)
+{
+    return intelvpl_new_encoder(MFX_CODEC_JPEG, enc);
+}
+
 static void intelvpl_free_encoder(void* encoder_raw)
 {
   intelvpl_encoder* encoder = (intelvpl_encoder*)encoder_raw;
@@ -372,7 +376,7 @@ static void append_chunk_data(intelvpl_encoder* encoder, uintptr_t pts)
   //std::vector<uint8_t>& pktdata = encoder->output_data.front().data;
   for (;;)
   {
-    if (encoder->codecId != MFX_CODEC_AV1) {
+    if (encoder->codecId == MFX_CODEC_HEVC || encoder->codecId == MFX_CODEC_AVC) {
     // AVC, HEVC have start codes
     mfxU32 startIndex = 0;
     while (startIndex < bs.DataLength - 3 &&
@@ -453,37 +457,47 @@ static heif_error intelvpl_start_sequence_encoding_intern(void* encoder_raw, con
   // Initialize encode parameters
   mfxVideoParam encodeParams = {};
   encodeParams.mfx.CodecId = encoder->codecId;
-  encodeParams.mfx.TargetUsage = MFX_TARGETUSAGE_BALANCED;
-  if (options && options->keyframe_distance_max) {
-    encodeParams.mfx.GopPicSize = options->keyframe_distance_max;
-  }
-
-  if (image_sequence && options) {
-    switch (options->gop_structure) {
-    case heif_sequence_gop_structure_intra_only:
-      encodeParams.mfx.GopPicSize = 1;
-      break;
-    case heif_sequence_gop_structure_lowdelay:
-      encodeParams.mfx.GopPicSize = 1; // TODO
-      break;
-    case heif_sequence_gop_structure_unrestricted:
-      break;
-    }
-  }
-  else {
-    encodeParams.mfx.GopPicSize = 1;
-  }
-  int qp; // constant quantization parameter
-  qp = encoder->quality;
-  qp = std::max(qp, 0);
-  qp = std::min(qp, 100);
-  qp = ((100 - qp) * 63 + 50) / 100;
-  encodeParams.mfx.QPI = qp;
-  encodeParams.mfx.QPP = qp;
-  encodeParams.mfx.QPB = qp;
-  encodeParams.mfx.RateControlMethod = MFX_RATECONTROL_CQP;
   encodeParams.mfx.FrameInfo.FrameRateExtN = framerate_num;
   encodeParams.mfx.FrameInfo.FrameRateExtD = framerate_denom;
+  if (encoder->codecId != MFX_CODEC_JPEG) {
+    encodeParams.mfx.TargetUsage = MFX_TARGETUSAGE_BALANCED;
+    if (options && options->keyframe_distance_max) {
+      encodeParams.mfx.GopPicSize = options->keyframe_distance_max;
+    }
+
+    if (image_sequence && options) {
+      switch (options->gop_structure) {
+      case heif_sequence_gop_structure_intra_only:
+        encodeParams.mfx.GopPicSize = 1;
+        break;
+      case heif_sequence_gop_structure_lowdelay:
+        encodeParams.mfx.GopPicSize = 1; // TODO
+        break;
+      case heif_sequence_gop_structure_unrestricted:
+        break;
+      }
+    }
+    else {
+      encodeParams.mfx.GopPicSize = 1;
+    }
+    int qp; // constant quantization parameter
+    qp = encoder->quality;
+    qp = std::max(qp, 0);
+    qp = std::min(qp, 100);
+    qp = ((100 - qp) * 63 + 50) / 100;
+    encodeParams.mfx.QPI = qp;
+    encodeParams.mfx.QPP = qp;
+    encodeParams.mfx.QPB = qp;
+    encodeParams.mfx.RateControlMethod = MFX_RATECONTROL_CQP;
+  }
+  else {
+    encodeParams.mfx.Interleaved = 0;
+    int qp; // constant quantization parameter
+    qp = encoder->quality;
+    qp = std::max(qp, 0);
+    qp = std::min(qp, 100);
+    encodeParams.mfx.Quality = qp;
+  }
   if (isGreyscale) {
     encodeParams.mfx.FrameInfo.ChromaFormat = MFX_CHROMAFORMAT_MONOCHROME;
     encodeParams.mfx.FrameInfo.FourCC = MFX_FOURCC_P8;
@@ -580,6 +594,7 @@ static heif_error intelvpl_start_sequence_encoding_intern(void* encoder_raw, con
   else {
     //sts = MFXVideoENCODE_Reset(session, &encodeParams); // This does not produce a SPS NAL Unit for the next frame/tile.
     MFXVideoENCODE_Close(session);
+    video_encode_initialized = false;
     sts = MFXVideoENCODE_Init(session, &encodeParams);
   }
   if (MFX_ERR_NONE != sts) {
@@ -638,7 +653,7 @@ static heif_error intelvpl_encode_sequence_frame(void* encoder_raw, const heif_i
       return {
         heif_error_Encoder_plugin_error,
         heif_suberror_Unsupported_bit_depth,
-        "Luma bit depth must equal the chroma bit depth"
+        "Memory mapping failed"
       };
     }
 
@@ -784,6 +799,7 @@ static heif_error intelvpl_encode_sequence_frame(void* encoder_raw, const heif_i
           }
         } while (sts == MFX_WRN_IN_EXECUTION);
       }
+      //sts == MFX_ERR_NONE; // reset status so it won't interfere with loop condition
       break;
     case MFX_ERR_NOT_ENOUGH_BUFFER:
       // This example deliberatly uses a large output buffer with immediate
@@ -996,13 +1012,13 @@ static heif_error intelvpl_get_parameter_quality(void* encoder_raw, int* quality
 
 static heif_error intelvpl_set_parameter_lossless(void* encoder_raw, int enable)
 {
-  return heif_error_ok;
+  return heif_error_unsupported_parameter;
 }
 
 static heif_error intelvpl_get_parameter_lossless(void* encoder_raw, int* enable)
 {
   *enable = 0;
-  return heif_error_ok;
+  return heif_error_unsupported_parameter;
 }
 
 static heif_error intelvpl_set_parameter_logging_level(void* encoder_raw, int logging)
@@ -1184,6 +1200,50 @@ static const heif_encoder_plugin encoder_libvpl_AV1
 const heif_encoder_plugin* get_encoder_plugin_libvpl_AV1()
 {
   return &encoder_libvpl_AV1;
+}
+
+static const heif_encoder_plugin encoder_libvpl_JPEG
+{
+    /* plugin_api_version */ 4,
+    /* compression_format */ heif_compression_JPEG,
+    /* id_name */ "jpeg_qsv",
+    /* priority */ INTELVPL_PLUGIN_PRIORITY,
+    /* supports_lossy_compression */ true,
+    /* supports_lossless_compression */ false,
+    /* get_plugin_name */ intelvpl_JPEG_plugin_name,
+    /* init_plugin */ intelvpl_init_plugin,
+    /* cleanup_plugin */ intelvpl_cleanup_plugin,
+    /* new_encoder */ intelvpl_new_encoder_JPEG,
+    /* free_encoder */ intelvpl_free_encoder,
+    /* set_parameter_quality */ intelvpl_set_parameter_quality,
+    /* get_parameter_quality */ intelvpl_get_parameter_quality,
+    /* set_parameter_lossless */ intelvpl_set_parameter_lossless,
+    /* get_parameter_lossless */ intelvpl_get_parameter_lossless,
+    /* set_parameter_logging_level */ intelvpl_set_parameter_logging_level,
+    /* get_parameter_logging_level */ intelvpl_get_parameter_logging_level,
+    /* list_parameters */ intelvpl_list_parameters,
+    /* set_parameter_integer */ intelvpl_set_parameter_integer,
+    /* get_parameter_integer */ intelvpl_get_parameter_integer,
+    /* set_parameter_boolean */ intelvpl_set_parameter_integer, // boolean also maps to integer function
+    /* get_parameter_boolean */ intelvpl_get_parameter_integer, // boolean also maps to integer function
+    /* set_parameter_string */ intelvpl_set_parameter_string,
+    /* get_parameter_string */ intelvpl_get_parameter_string,
+    /* query_input_colorspace */ intelvpl_query_input_colorspace,
+    /* encode_image */ intelvpl_encode_image,
+    /* get_compressed_data */ intelvpl_get_compressed_data,
+    /* query_input_colorspace (v2) */ intelvpl_query_input_colorspace2,
+    /* query_encoded_size (v3) */ intelvpl_query_encoded_size,
+    /* minimum_required_libheif_version */ LIBHEIF_MAKE_VERSION(1,21,0),
+    /* start_sequence_encoding (v4) */ intelvpl_start_sequence_encoding,
+    /* encode_sequence_frame (v4) */ intelvpl_encode_sequence_frame,
+    /* end_sequence_encoding (v4) */ intelvpl_end_sequence_encoding,
+    /* get_compressed_data2 (v4) */ intelvpl_get_compressed_data2,
+    /* does_indicate_keyframes (v4) */ 0
+};
+
+const heif_encoder_plugin* get_encoder_plugin_libvpl_JPEG()
+{
+    return &encoder_libvpl_JPEG;
 }
 
 #if PLUGIN_INTELVPL

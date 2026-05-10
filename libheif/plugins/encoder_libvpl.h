@@ -26,6 +26,7 @@
 const struct heif_encoder_plugin* get_encoder_plugin_libvpl_HEVC();
 const struct heif_encoder_plugin* get_encoder_plugin_libvpl_AVC();
 const struct heif_encoder_plugin* get_encoder_plugin_libvpl_AV1();
+const struct heif_encoder_plugin* get_encoder_plugin_libvpl_JPEG();
 
 #if PLUGIN_LIBVPL
 extern "C" {
