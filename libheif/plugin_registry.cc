@@ -243,6 +243,7 @@ void register_default_plugins()
   register_encoder(get_encoder_plugin_libvpl_HEVC());
   register_encoder(get_encoder_plugin_libvpl_AVC());
   register_encoder(get_encoder_plugin_libvpl_AV1());
+  // TODO: JPEG was not working
 #endif
 
 #if WITH_UNCOMPRESSED_CODEC
