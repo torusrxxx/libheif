@@ -140,21 +140,19 @@ static const char kSuccess[] = "Success";
 
 static const int INTELVPL_PLUGIN_PRIORITY = 100;
 
-#define MAX_PLUGIN_NAME_LENGTH 80
-
-static char plugin_name[MAX_PLUGIN_NAME_LENGTH];
-
-
 static const char* intelvpl_HEVC_plugin_name()
 {
-  strcpy(plugin_name, "Intel QSV HEVC encoder");
-  return plugin_name;
+  return "Intel QSV HEVC encoder";
 }
 
 static const char* intelvpl_AVC_plugin_name()
 {
-    strcpy(plugin_name, "Intel QSV AVC encoder");
-    return plugin_name;
+  return "Intel QSV AVC encoder";
+}
+
+static const char* intelvpl_AV1_plugin_name()
+{
+  return "Intel QSV AV1 encoder";
 }
 
 extern mfxLoader loader;
@@ -350,6 +348,11 @@ static heif_error intelvpl_new_encoder_AVC(void** enc)
   return intelvpl_new_encoder(MFX_CODEC_AVC, enc);
 }
 
+static heif_error intelvpl_new_encoder_AV1(void** enc)
+{
+    return intelvpl_new_encoder(MFX_CODEC_AV1, enc);
+}
+
 static void intelvpl_free_encoder(void* encoder_raw)
 {
   intelvpl_encoder* encoder = (intelvpl_encoder*)encoder_raw;
@@ -369,6 +372,8 @@ static void append_chunk_data(intelvpl_encoder* encoder, uintptr_t pts)
   //std::vector<uint8_t>& pktdata = encoder->output_data.front().data;
   for (;;)
   {
+    if (encoder->codecId != MFX_CODEC_AV1) {
+    // AVC, HEVC have start codes
     mfxU32 startIndex = 0;
     while (startIndex < bs.DataLength - 3 &&
       (bs.Data[bs.DataOffset + startIndex] != 0 ||
@@ -394,20 +399,33 @@ static void append_chunk_data(intelvpl_encoder* encoder, uintptr_t pts)
     pkt.data.resize(end_idx - startIndex - 3);
     memcpy(pkt.data.data(), bs.Data + bs.DataOffset + startIndex + 3, pkt.data.size());
     pkt.frameNr = pts;
-    //pkt.more_nals = true; // will be set to 'false' for last NAL below.
 
     //std::cout << "append frameNr=" << pts << " NAL:" << ((int)pkt.data[1]>>3) << " size:" << pkt.data.size() << "\n";
 
     encoder->output_data.emplace_back(std::move(pkt));
-
     if (end_idx == bs.DataLength) {
-      bs.DataOffset = 0;
-      bs.DataLength = 0;
-      break;
+        bs.DataOffset = 0;
+        bs.DataLength = 0;
+        break;
     }
 
     bs.DataOffset += end_idx;
     bs.DataLength -= end_idx - startIndex;
+    }
+    else {
+    // AV1 has no start codes
+    intelvpl_encoder::Packet pkt;
+    pkt.data.resize(bs.DataLength);
+    memcpy(pkt.data.data(), bs.Data + bs.DataOffset, pkt.data.size());
+    pkt.frameNr = pts;
+
+    //std::cout << "append frameNr=" << pts << " NAL:" << ((int)pkt.data[1]>>3) << " size:" << pkt.data.size() << "\n";
+
+    encoder->output_data.emplace_back(std::move(pkt));
+    bs.DataOffset = 0;
+    bs.DataLength = 0;
+    }
+
   }
   if (bs.DataLength != 0) {
     memmove(bs.Data, bs.Data + bs.DataOffset, bs.DataLength);
@@ -495,12 +513,19 @@ static heif_error intelvpl_start_sequence_encoding_intern(void* encoder_raw, con
   }
   else if (chroma == heif_chroma_422) {
     encodeParams.mfx.FrameInfo.ChromaFormat = MFX_CHROMAFORMAT_YUV422;
-    encodeParams.mfx.FrameInfo.FourCC = MFX_FOURCC_YUY2;
-    return heif_error{
-      heif_error_Encoder_plugin_error,
-      heif_suberror_Unsupported_image_type,
-      "Unsupported bitdepth"
-    };
+    if (bit_depth == 8) {
+      encodeParams.mfx.FrameInfo.FourCC = MFX_FOURCC_YUY2;
+    }
+    else if (bit_depth == 10) {
+      encodeParams.mfx.FrameInfo.FourCC = MFX_FOURCC_Y210;
+    }
+    else {
+      return heif_error{
+        heif_error_Encoder_plugin_error,
+        heif_suberror_Unsupported_image_type,
+        "Unsupported bitdepth"
+      };
+    }
   }
   else if (chroma == heif_chroma_444) {
     encodeParams.mfx.FrameInfo.ChromaFormat = MFX_CHROMAFORMAT_YUV444;
@@ -690,6 +715,43 @@ static heif_error intelvpl_encode_sequence_frame(void* encoder_raw, const heif_i
           }
         }
       }
+    }
+                        break;
+    case MFX_FOURCC_YUY2: {
+      for(int y = 0; y < input_height; y++) {
+        for(int x = 0; x < (input_width + 1) / 2; x++) {
+          encSurfaceIn->Data.Y[y * pitch + x * 4] = data[0][y * stride[0] + x * 2];
+          encSurfaceIn->Data.Y[y * pitch + x * 4 + 1] = data[1][y * stride[1] + x];
+          if (x * 2 + 1 < input_width)
+            encSurfaceIn->Data.Y[y * pitch + x * 4 + 2] = data[0][y * stride[0] + x * 2 + 1];
+          encSurfaceIn->Data.Y[y * pitch + x * 4 + 3] = data[2][y * stride[2] + x];
+        }
+      }
+    }
+                        break;
+    case MFX_FOURCC_Y210: {
+    if (encSurfaceIn->Info.Shift == 0) { // No shift
+      for(int y = 0; y < input_height; y++) {
+        for(int x = 0; x < (input_width + 1) / 2; x++) {
+          encSurfaceIn->Data.Y16[y * (pitch / 2) + x * 4] = ((uint16_t*)data[0])[y * (stride[0]/2) + x * 2];
+          encSurfaceIn->Data.Y16[y * (pitch / 2) + x * 4 + 1] = ((uint16_t*)data[1])[y * (stride[1]/2) + x];
+          if (x * 2 + 1 < input_width)
+            encSurfaceIn->Data.Y16[y * (pitch / 2) + x * 4 + 2] = ((uint16_t*)data[0])[y * (stride[0]/2) + x * 2 + 1];
+          encSurfaceIn->Data.Y16[y * (pitch / 2) + x * 4 + 3] = ((uint16_t*)data[2])[y * (stride[2]/2) + x];
+        }
+      }
+    }
+    else {
+      for(int y = 0; y < input_height; y++) {
+        for(int x = 0; x < (input_width + 1) / 2; x++) {
+          encSurfaceIn->Data.Y16[y * (pitch / 2) + x * 4] = ((uint16_t*)data[0])[y * (stride[0]/2) + x * 2] << 6;
+          encSurfaceIn->Data.Y16[y * (pitch / 2) + x * 4 + 1] = ((uint16_t*)data[1])[y * (stride[1]/2) + x] << 6;
+          if (x * 2 + 1 < input_width)
+            encSurfaceIn->Data.Y16[y * (pitch / 2) + x * 4 + 2] = ((uint16_t*)data[0])[y * (stride[0]/2) + x * 2 + 1] << 6;
+          encSurfaceIn->Data.Y16[y * (pitch / 2) + x * 4 + 3] = ((uint16_t*)data[2])[y * (stride[2]/2) + x] << 6;
+        }
+      }
+    }
     }
                         break;
     default:
@@ -902,6 +964,9 @@ static heif_chroma intelvpl_get_chroma_format(const mfxFrameInfo* info) {
   case MFX_FOURCC_I420:
   case MFX_FOURCC_P010:
     return heif_chroma_420;
+  case MFX_FOURCC_YUY2:
+  case MFX_FOURCC_Y210:
+    return heif_chroma_422;
   case MFX_FOURCC_RGB4:
     return heif_chroma_interleaved_RGBA;
   default:
@@ -1077,6 +1142,49 @@ const heif_encoder_plugin* get_encoder_plugin_libvpl_AVC()
     return &encoder_libvpl_AVC;
 }
 
+static const heif_encoder_plugin encoder_libvpl_AV1
+{
+  /* plugin_api_version */ 4,
+  /* compression_format */ heif_compression_AV1,
+  /* id_name */ "av1_qsv",
+  /* priority */ INTELVPL_PLUGIN_PRIORITY,
+  /* supports_lossy_compression */ true,
+  /* supports_lossless_compression */ false,
+  /* get_plugin_name */ intelvpl_AV1_plugin_name,
+  /* init_plugin */ intelvpl_init_plugin,
+  /* cleanup_plugin */ intelvpl_cleanup_plugin,
+  /* new_encoder */ intelvpl_new_encoder_AV1,
+  /* free_encoder */ intelvpl_free_encoder,
+  /* set_parameter_quality */ intelvpl_set_parameter_quality,
+  /* get_parameter_quality */ intelvpl_get_parameter_quality,
+  /* set_parameter_lossless */ intelvpl_set_parameter_lossless,
+  /* get_parameter_lossless */ intelvpl_get_parameter_lossless,
+  /* set_parameter_logging_level */ intelvpl_set_parameter_logging_level,
+  /* get_parameter_logging_level */ intelvpl_get_parameter_logging_level,
+  /* list_parameters */ intelvpl_list_parameters,
+  /* set_parameter_integer */ intelvpl_set_parameter_integer,
+  /* get_parameter_integer */ intelvpl_get_parameter_integer,
+  /* set_parameter_boolean */ intelvpl_set_parameter_integer, // boolean also maps to integer function
+  /* get_parameter_boolean */ intelvpl_get_parameter_integer, // boolean also maps to integer function
+  /* set_parameter_string */ intelvpl_set_parameter_string,
+  /* get_parameter_string */ intelvpl_get_parameter_string,
+  /* query_input_colorspace */ intelvpl_query_input_colorspace,
+  /* encode_image */ intelvpl_encode_image,
+  /* get_compressed_data */ intelvpl_get_compressed_data,
+  /* query_input_colorspace (v2) */ intelvpl_query_input_colorspace2,
+  /* query_encoded_size (v3) */ intelvpl_query_encoded_size,
+  /* minimum_required_libheif_version */ LIBHEIF_MAKE_VERSION(1,21,0),
+  /* start_sequence_encoding (v4) */ intelvpl_start_sequence_encoding,
+  /* encode_sequence_frame (v4) */ intelvpl_encode_sequence_frame,
+  /* end_sequence_encoding (v4) */ intelvpl_end_sequence_encoding,
+  /* get_compressed_data2 (v4) */ intelvpl_get_compressed_data2,
+  /* does_indicate_keyframes (v4) */ 0
+};
+
+const heif_encoder_plugin* get_encoder_plugin_libvpl_AV1()
+{
+  return &encoder_libvpl_AV1;
+}
 
 #if PLUGIN_INTELVPL
 heif_plugin_info plugin_info{
