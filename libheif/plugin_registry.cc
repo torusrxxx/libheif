@@ -239,9 +239,10 @@ void register_default_plugins()
   register_decoder(get_decoder_plugin_libvpl());
 #endif
 
-#if HAVE_LIBVPL_DECODER
+#if HAVE_LIBVPL_ENCODER
   register_encoder(get_encoder_plugin_libvpl_HEVC());
   register_encoder(get_encoder_plugin_libvpl_AVC());
+  register_encoder(get_encoder_plugin_libvpl_AV1());
 #endif
 
 #if WITH_UNCOMPRESSED_CODEC
