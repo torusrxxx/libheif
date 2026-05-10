@@ -10,10 +10,6 @@
 ///
 /// @file
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #ifdef USE_MEDIASDK1
 #include "mfxvideo.h"
 enum {
@@ -48,11 +44,8 @@ enum {
 //#define USE_EXTERNAL_MEMORY
 
 #define WAIT_100_MILLISECONDS 100
-#define MAX_WIDTH             3840
-#define MAX_HEIGHT            2160
 
 #define ALIGN16(value)           (((value + 15) >> 4) << 4)
-#define ALIGN32(X)               (((mfxU32)((X) + 31)) & (~(mfxU32)31))
 #define VPLVERSION(major, minor) (major << 16 | minor)
 
 //==============================================================================
@@ -95,10 +88,7 @@ enum {
 #include "libheif/heif_plugin.h"
 #include "decoder_libvpl.h"
 #include <cassert>
-#include <memory>
-#include <cstring>
 #include <string>
-#include "nalu_utils.h"
 
 #ifdef USE_EXTERNAL_MEMORY
 mfxU32 GetSurfaceSize(mfxU32 FourCC, mfxU32 width, mfxU32 height) {
@@ -241,6 +231,26 @@ public:
   }
 };
 
+static mfxU32 FourCC_from_heif(heif_compression_format format) {
+  switch (format) {
+  case heif_compression_HEVC:
+    return MFX_CODEC_HEVC;
+    break;
+  case heif_compression_AV1:
+    return MFX_CODEC_AV1;
+    break;
+  case heif_compression_AVC:
+    return MFX_CODEC_AVC;
+    break;
+  case heif_compression_VVC:
+    return MFX_CODEC_VVC;
+  case heif_compression_JPEG:
+    return MFX_CODEC_JPEG;
+  default:
+    return 0;
+  }
+}
+
 static const char kEmptyString[] = "";
 static const char kSuccess[] = "Success";
 
@@ -298,6 +308,12 @@ static int intelvpl_does_support_format(heif_compression_format format)
   }
   else if (format == heif_compression_AVC) {
     return INTELVPL_PLUGIN_PRIORITY;
+  }
+  else if (format == heif_compression_JPEG) {
+    return INTELVPL_PLUGIN_PRIORITY; // TODO: Very large JPEG might not decode
+  }
+  else if (format == heif_compression_VVC) {
+    return INTELVPL_PLUGIN_PRIORITY; // TODO: Not every CPU support VVC
   }
   else {
     return 0;
@@ -417,20 +433,7 @@ static heif_error intelvpl_init_session(uint32_t codecId) {
 // Create a new decoder context for decoding an image
 heif_error intelvpl_new_decoder2(void** dec, const heif_decoder_plugin_options* options)
 {
-  uint32_t codecId = 0;
-  switch (options->format) {
-  case heif_compression_HEVC:
-    codecId = MFX_CODEC_HEVC;
-    break;
-  case heif_compression_AV1:
-    codecId = MFX_CODEC_AV1;
-    break;
-  case heif_compression_AVC:
-    codecId = MFX_CODEC_AVC;
-    break;
-  default:
-    codecId = 0;
-  }
+  uint32_t codecId = FourCC_from_heif(options->format);
   heif_error err = { heif_error_Ok, heif_suberror_Unspecified, kSuccess };
   if (codecId == 0)
     return err;
@@ -739,7 +742,7 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
       bs.MaxLength = hevc_data_size;
       bs.DataLength = hevc_data_size;
     }
-    else if (decoder->decodeParams.mfx.CodecId == MFX_CODEC_AV1) {
+    else if (decoder->decodeParams.mfx.CodecId == MFX_CODEC_AV1 || decoder->decodeParams.mfx.CodecId == MFX_CODEC_JPEG) {
       hevc_data = (uint8_t*)_aligned_malloc(decoder->data.size(), 32); // TODO
       hevc_data_size = decoder->data.size();
       memcpy(hevc_data, decoder->data.data(), hevc_data_size);
@@ -754,8 +757,6 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
         "Error decoding header\n"
       };
     }
-    //bs.DecodeTimeStamp = MFX_TIMESTAMPCALC_UNKNOWN;
-    //decoder->decodeParams.mfx.CodecId = MFX_CODEC_HEVC;
     decoder->decodeParams.IOPattern = MFX_IOPATTERN_OUT_SYSTEM_MEMORY;
     decoder->decodeParams.NumExtParam = 3;
     mfxExtBuffer* extBuffer[3];
