@@ -10,52 +10,12 @@
 ///
 /// @file
 
-#ifdef USE_MEDIASDK1
-#include "mfxvideo.h"
-enum {
-  MFX_FOURCC_I420 = MFX_FOURCC_IYUV /*!< Alias for the IYUV color format. */
-};
-#else
-#include "vpl/mfxjpeg.h"
-#include "vpl/mfxvideo.h"
-#endif
-
-#if (MFX_VERSION >= 2000)
-#include "vpl/mfxdispatcher.h"
-#endif
+#include "hardware_intel_qsv.h"
 
 #ifdef __linux__
 #include <fcntl.h>
 #include <unistd.h>
 #endif
-
-#ifdef LIBVA_SUPPORT
-#include "va/va.h"
-#include "va/va_drm.h"
-#endif
-
-#define WAIT_100_MILLISECONDS 100
-
-#define ALIGN16(value)           (((value + 15) >> 4) << 4)
-#define ALIGN32(X)               (((mfxU32)((X) + 31)) & (~(mfxU32)31))
-#define VPLVERSION(major, minor) (major << 16 | minor)
-
-//==============================================================================
-// Copyright Intel Corporation
-//
-// SPDX-License-Identifier: MIT
-//==============================================================================
-
-///
-/// A minimal Intel® Video Processing Library (Intel® VPL) encode application,
-/// using 2.2 or newer API with internal memory management.
-/// For more information see
-/// https://intel.github.io/libvpl
-/// @file
-
-#define MAJOR_API_VERSION_REQUIRED 2
-#define MINOR_API_VERSION_REQUIRED 2
-
 /*
  * HEIF codec.
  * Copyright (c) 2017 Dirk Farin <dirk.farin@gmail.com>

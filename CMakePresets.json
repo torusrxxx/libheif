@@ -9,7 +9,6 @@
     {
       "name": "develop",
       "displayName": "development",
-      "generator": "Ninja",
       "description": "Enable all experimental features. Do not use plugins, compile everything built-in.",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
@@ -17,7 +16,6 @@
         "BUILD_TESTING": "ON",
         "ENABLE_EXPERIMENTAL_FEATURES": "ON",
         "CMAKE_COMPILE_WARNING_AS_ERROR": "OFF",
-        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
 
         "ENABLE_PLUGIN_LOADING" : "OFF",
         "WITH_AOM_DECODER" : "ON",
@@ -191,6 +189,7 @@
         "CMAKE_COMPILE_WARNING_AS_ERROR" : "ON",
         "WITH_REDUCED_VISIBILITY" : "OFF",
         "WITH_UNCOMPRESSED_CODEC" : "ON",
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
         "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
       }
     },
