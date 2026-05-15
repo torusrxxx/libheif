@@ -9,7 +9,6 @@
     {
       "name": "develop",
       "displayName": "development",
-      "generator": "Ninja",
       "description": "Enable all experimental features. Do not use plugins, compile everything built-in.",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
@@ -17,7 +16,6 @@
         "BUILD_TESTING": "ON",
         "ENABLE_EXPERIMENTAL_FEATURES": "ON",
         "CMAKE_COMPILE_WARNING_AS_ERROR": "OFF",
-        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
 
         "ENABLE_PLUGIN_LOADING" : "OFF",
         "WITH_AOM_DECODER" : "ON",
@@ -61,10 +59,9 @@
         "WITH_VVENC" : "ON",
         "WITH_VVENC_PLUGIN" : "OFF",
         "WITH_LIBVPL_DECODER": "ON",
-        "WITH_LIBVPL_DECODER_PLUGIN": "ON",
+        "WITH_LIBVPL_DECODER_PLUGIN": "OFF",
         "WITH_LIBVPL_ENCODER": "ON",
-        "WITH_LIBVPL_ENCODER_PLUGIN": "ON",
-        "ENABLE_PARALLEL_TILE_DECODING": "OFF",
+        "WITH_LIBVPL_ENCODER_PLUGIN": "OFF",
 
         "WITH_REDUCED_VISIBILITY": "OFF",
         "WITH_HEADER_COMPRESSION": "ON",
@@ -78,7 +75,6 @@
     {
       "name": "release",
       "displayName": "Standard release build",
-      "generator": "Ninja",
       "description": "Recommended parameters for a release build.",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
@@ -86,7 +82,6 @@
         "BUILD_TESTING" : "OFF",
         "ENABLE_EXPERIMENTAL_FEATURES" : "OFF",
         "CMAKE_COMPILE_WARNING_AS_ERROR" : "OFF",
-        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
 
         "ENABLE_PLUGIN_LOADING": "ON",
         "WITH_AOM_DECODER": "ON",
@@ -127,7 +122,8 @@
         "WITH_VVENC_PLUGIN": "ON",
         "WITH_LIBVPL_DECODER": "ON",
         "WITH_LIBVPL_DECODER_PLUGIN": "ON",
-        "ENABLE_PARALLEL_TILE_DECODING": "OFF",
+        "WITH_LIBVPL_ENCODER": "ON",
+        "WITH_LIBVPL_ENCODER_PLUGIN": "ON",
 
         "WITH_REDUCED_VISIBILITY": "ON",
         "WITH_HEADER_COMPRESSION": "ON",
@@ -139,7 +135,6 @@
     {
       "name": "release-noplugins",
       "displayName": "Release build without plugins",
-      "generator": "Ninja",
       "description": "Release without plugins with minimal configuration for HEIC and AVIF.",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
@@ -147,7 +142,6 @@
         "BUILD_TESTING" : "OFF",
         "ENABLE_EXPERIMENTAL_FEATURES" : "OFF",
         "CMAKE_COMPILE_WARNING_AS_ERROR" : "OFF",
-        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
 
         "ENABLE_PLUGIN_LOADING": "OFF",
         "WITH_AOM_DECODER": "ON",
@@ -169,8 +163,7 @@
         "WITH_VVDEC": "OFF",
         "WITH_VVENC": "OFF",
         "WITH_LIBVPL_DECODER": "OFF",
-        "WITH_LIBVPL_DECODER_PLUGIN": "OFF",
-        "ENABLE_PARALLEL_TILE_DECODING": "ON",
+        "WITH_LIBVPL_ENCODER": "OFF",
 
         "WITH_REDUCED_VISIBILITY": "ON",
         "WITH_HEADER_COMPRESSION": "OFF",
@@ -182,25 +175,22 @@
     {
       "name": "testing",
       "displayName": "Tests",
-      "generator": "Ninja",
       "description": "For running the tests",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "ENABLE_PLUGIN_LOADING" : "OFF",
-        "BUILD_TESTING" : "ON",
-        "ENABLE_EXPERIMENTAL_FEATURES" : "ON",
-        "ENABLE_EXPERIMENTAL_MINI_FORMAT" : "ON",
-        "CMAKE_COMPILE_WARNING_AS_ERROR" : "ON",
-        "WITH_REDUCED_VISIBILITY" : "OFF",
-        "WITH_UNCOMPRESSED_CODEC" : "ON",
-        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+        "ENABLE_PLUGIN_LOADING": "OFF",
+        "BUILD_TESTING": "ON",
+        "ENABLE_EXPERIMENTAL_FEATURES": "ON",
+        "ENABLE_EXPERIMENTAL_MINI_FORMAT": "ON",
+        "CMAKE_COMPILE_WARNING_AS_ERROR": "ON",
+        "WITH_REDUCED_VISIBILITY": "OFF",
+        "WITH_UNCOMPRESSED_CODEC": "ON"
       }
     },
     {
       "name": "fuzzing",
       "inherits": "release",
       "displayName": "Fuzzing",
-      "generator": "Ninja",
       "description": "For running the fuzzers",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
@@ -211,8 +201,7 @@
         "WITH_FUZZERS": "ON",
         "WITH_EXAMPLES": "OFF",
         "ENABLE_PLUGIN_LOADING": "OFF",
-        "WITH_REDUCED_VISIBILITY": "OFF",
-        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+        "WITH_REDUCED_VISIBILITY": "OFF"
       }
     }
   ]
