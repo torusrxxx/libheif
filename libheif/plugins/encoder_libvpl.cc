@@ -199,6 +199,46 @@ void intelvpl_query_encoded_size(void* encoder_raw, uint32_t input_width, uint32
   *encoded_height = (input_height + 7) & ~0x7U;
 }
 
+static inline mfxExtVideoSignalInfo heif_to_qsv(const heif_color_profile_nclx& nclx) {
+  mfxExtVideoSignalInfo nclx_info = {};
+  nclx_info.Header.BufferId = MFX_EXTBUFF_VIDEO_SIGNAL_INFO;
+  nclx_info.Header.BufferSz = sizeof(nclx_info);
+  nclx_info.MatrixCoefficients = nclx.matrix_coefficients;
+  nclx_info.ColourPrimaries = nclx.color_primaries;
+  nclx_info.TransferCharacteristics = nclx.transfer_characteristics;
+  nclx_info.VideoFullRange = nclx.full_range_flag;
+  nclx_info.ColourDescriptionPresent = 1;
+  return nclx_info;
+}
+
+static inline mfxExtContentLightLevelInfo heif_to_qsv(const heif_content_light_level& cll) {
+  mfxExtContentLightLevelInfo cll_info = {};
+  cll_info.Header.BufferId = MFX_EXTBUFF_CONTENT_LIGHT_LEVEL_INFO;
+  cll_info.Header.BufferSz = sizeof(cll_info);
+  cll_info.InsertPayloadToggle = 1;
+  cll_info.MaxContentLightLevel = cll.max_content_light_level;
+  cll_info.MaxPicAverageLightLevel = cll.max_pic_average_light_level;
+  return cll_info;
+}
+
+static inline mfxExtMasteringDisplayColourVolume heif_to_qsv(const heif_mastering_display_colour_volume& mdcv) {
+  mfxExtMasteringDisplayColourVolume mdcv_info = {};
+  mdcv_info.Header.BufferId = MFX_EXTBUFF_MASTERING_DISPLAY_COLOUR_VOLUME;
+  mdcv_info.Header.BufferSz = sizeof(mdcv_info);
+  mdcv_info.DisplayPrimariesX[0] = mdcv.display_primaries_x[0];
+  mdcv_info.DisplayPrimariesY[0] = mdcv.display_primaries_y[0];
+  mdcv_info.DisplayPrimariesX[1] = mdcv.display_primaries_x[1];
+  mdcv_info.DisplayPrimariesY[1] = mdcv.display_primaries_y[1];
+  mdcv_info.DisplayPrimariesX[2] = mdcv.display_primaries_x[2];
+  mdcv_info.DisplayPrimariesY[2] = mdcv.display_primaries_y[2];
+  mdcv_info.WhitePointX = mdcv.white_point_x;
+  mdcv_info.WhitePointY = mdcv.white_point_y;
+  mdcv_info.MaxDisplayMasteringLuminance = mdcv.max_display_mastering_luminance;
+  mdcv_info.MinDisplayMasteringLuminance = mdcv.min_display_mastering_luminance;
+  mdcv_info.InsertPayloadToggle = 1;
+  return mdcv_info;
+}
+
 static heif_error intelvpl_init_session(mfxU32 codecId) {
   if (session != NULL)
     return { heif_error_Ok, heif_suberror_Unspecified, kSuccess };
@@ -523,7 +563,39 @@ static heif_error intelvpl_start_sequence_encoding_intern(void* encoder_raw, con
   encodeParams.mfx.FrameInfo.Height = ALIGN16(input_height);
 
   encodeParams.IOPattern = MFX_IOPATTERN_IN_SYSTEM_MEMORY;
-  // TODO: NCLX
+  // add SEI metadata
+  encodeParams.NumExtParam = 0;
+  if (encoder->codecId != MFX_CODEC_JPEG) {
+    mfxExtBuffer* extBuffer[3];
+    mfxExtVideoSignalInfo nclx_info = {};
+    mfxExtContentLightLevelInfo cll_info = {};
+    mfxExtMasteringDisplayColourVolume mdcv_info = {};
+    heif_color_profile_nclx* nclx;
+    heif_error get_metadata_err = heif_image_get_nclx_color_profile(image, &nclx);
+    if (get_metadata_err.code == 0 && nclx) {
+      nclx_info = heif_to_qsv(*nclx);
+      heif_nclx_color_profile_free(nclx);
+      extBuffer[encodeParams.NumExtParam] = (mfxExtBuffer*)&nclx_info;
+      encodeParams.NumExtParam++;
+    }
+    if (heif_image_has_content_light_level(image)) {
+      heif_content_light_level cll = { 0, 0 };
+      heif_image_get_content_light_level(image, &cll);
+      if (cll.max_content_light_level > 0 || cll.max_pic_average_light_level > 0) {
+        cll_info = heif_to_qsv(cll);
+        extBuffer[encodeParams.NumExtParam] = (mfxExtBuffer*)&cll_info;
+        encodeParams.NumExtParam++;
+      }
+    }
+    if (heif_image_has_mastering_display_colour_volume(image)) {
+      heif_mastering_display_colour_volume mdcv = {};
+      heif_image_get_mastering_display_colour_volume(image, &mdcv);
+      mdcv_info = heif_to_qsv(mdcv);
+      extBuffer[encodeParams.NumExtParam] = (mfxExtBuffer*)&mdcv_info;
+      encodeParams.NumExtParam++;
+    }
+    encodeParams.ExtParam = extBuffer;
+  }
 
 
   // --- encode headers
