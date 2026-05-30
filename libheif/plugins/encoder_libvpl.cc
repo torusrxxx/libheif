@@ -195,8 +195,8 @@ const heif_encoder_parameter** intelvpl_list_parameters(void* encoder)
 void intelvpl_query_encoded_size(void* encoder_raw, uint32_t input_width, uint32_t input_height,
   uint32_t* encoded_width, uint32_t* encoded_height)
 {
-  *encoded_width = (input_width + 7) & ~0x7U;
-  *encoded_height = (input_height + 7) & ~0x7U;
+  *encoded_width = input_width;
+  *encoded_height = input_height;
 }
 
 static inline mfxExtVideoSignalInfo heif_to_qsv(const heif_color_profile_nclx& nclx) {
@@ -673,8 +673,6 @@ static heif_error intelvpl_encode_sequence_frame(void* encoder_raw, const heif_i
   int input_width = heif_image_get_width(image, heif_channel_Y);
   int input_height = heif_image_get_height(image, heif_channel_Y);
 
-  uint32_t encoded_width, encoded_height;
-  intelvpl_query_encoded_size(encoder_raw, input_width, input_height, &encoded_width, &encoded_height);
   mfxFrameSurface1* encSurfaceIn = NULL;
   sts = MFXMemory_GetSurfaceForEncode(session, &encSurfaceIn);
   //VERIFY(MFX_ERR_NONE == sts, "Could not get encode surface");
