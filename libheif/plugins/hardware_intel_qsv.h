@@ -18,6 +18,9 @@
  * along with libheif.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+/*
+* Intel VPL acceleration. https://intel.github.io/libvpl/latest/index.html
+*/
 #ifndef LIBHEIF_HEIF_HARDWARE_INTEL_QSV_H
 #define LIBHEIF_HEIF_HARDWARE_INTEL_QSV_H
 
