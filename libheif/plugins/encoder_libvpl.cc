@@ -136,7 +136,7 @@ public:
     return sts;
   }
   ~intelvpl_surface_mapper() {
-    if (sts != MFX_ERR_NONE)
+    if (sts == MFX_ERR_NONE)
       surface->FrameInterface->Unmap(surface);
   }
 };
@@ -428,6 +428,7 @@ static void append_chunk_data(intelvpl_encoder* encoder, uintptr_t pts)
     encoder->output_data.emplace_back(std::move(pkt));
     bs.DataOffset = 0;
     bs.DataLength = 0;
+    break;
     }
 
   }
@@ -673,6 +674,8 @@ static heif_error intelvpl_encode_sequence_frame(void* encoder_raw, const heif_i
   int input_width = heif_image_get_width(image, heif_channel_Y);
   int input_height = heif_image_get_height(image, heif_channel_Y);
 
+  int device_busy_count = 0;
+
   mfxFrameSurface1* encSurfaceIn = NULL;
   sts = MFXMemory_GetSurfaceForEncode(session, &encSurfaceIn);
   //VERIFY(MFX_ERR_NONE == sts, "Could not get encode surface");
@@ -855,6 +858,15 @@ static heif_error intelvpl_encode_sequence_frame(void* encoder_raw, const heif_i
     case MFX_WRN_DEVICE_BUSY:
       // For non-CPU implementations,
       // Wait a few milliseconds then try again
+      if(device_busy_count > 20) {
+          return {
+            heif_error_Encoder_plugin_error,
+            heif_suberror_Security_limit_exceeded,
+            "MFX_WRN_DEVICE_BUSY too many times"
+          };
+      }
+      device_busy_count++;
+      _sleep(10);
       break;
     default:
       printf("unknown status %d\n", sts);

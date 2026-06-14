@@ -23,6 +23,7 @@
 #pragma comment(lib, "vpl.lib")
 #endif
 
+// TODO: Intel VPL memory access violation 10-bit AV1
 // Use external surface works (no idea if it works or not)
 //#define USE_EXTERNAL_MEMORY
 
@@ -141,21 +142,56 @@ void FreeExternalSystemMemorySurfacePool(mfxU8* dec_buf, std::vector<mfxFrameSur
   surfpool.clear();
 }
 #endif
-
 #define intelvpl_buffer_max_size 4096
+#include <list>
+
+class intelvpl_surface_mapper {
+  mfxFrameSurface1* surface;
+  mfxStatus sts;
+public:
+  intelvpl_surface_mapper(mfxFrameSurface1* surface, mfxMemoryFlags access) : surface(surface) {
+    this->surface->FrameInterface->AddRef(this->surface);
+    sts = this->surface->FrameInterface->Map(this->surface, access);
+  }
+  mfxStatus status() const {
+    return sts;
+  }
+  ~intelvpl_surface_mapper() {
+    if (sts == MFX_ERR_NONE)
+      surface->FrameInterface->Unmap(surface);
+    this->surface->FrameInterface->Release(this->surface);
+  }
+};
+
 struct intelvpl_decoder_image_chain
 {
-  intelvpl_decoder_image_chain* next = NULL;
-  mfxFrameSurface1* decSurfaceOut = NULL;
+  mfxFrameSurface1* decSurfaceOut = nullptr;
   mfxSyncPoint syncp = {};
+  void set(mfxFrameSurface1* surface) {
+    decSurfaceOut = surface;
+    decSurfaceOut->FrameInterface->AddRef(decSurfaceOut);
+  }
+  intelvpl_decoder_image_chain() {
+    decSurfaceOut = nullptr;
+    syncp = {};
+  }
+  intelvpl_decoder_image_chain(intelvpl_decoder_image_chain&& other) noexcept {
+    syncp = other.syncp;
+    decSurfaceOut = other.decSurfaceOut;
+    other.syncp = {};
+    other.decSurfaceOut = nullptr;
+  }
+  ~intelvpl_decoder_image_chain() {
+    if(decSurfaceOut)
+      decSurfaceOut->FrameInterface->Release(decSurfaceOut);
+  }
 };
 struct intelvpl_decoder
 {
   bool strict_decoding = false;
   bool initialized = false;
   std::string error_message;
-  intelvpl_decoder_image_chain* images = NULL;
-  intelvpl_decoder_image_chain* images_current = NULL;
+  std::list<intelvpl_decoder_image_chain> images;
   mfxVideoParam decodeParams = {};
   mfxExtVideoSignalInfo nclx_info = {};
   mfxExtContentLightLevelInfo cll_info = {};
@@ -166,30 +202,14 @@ struct intelvpl_decoder
   mfxU8* decOutBuf = NULL;
 #endif
   intelvpl_decoder() {
-    images = new intelvpl_decoder_image_chain();
-    images_current = images;
     nclx_info.Header.BufferId = MFX_EXTBUFF_VIDEO_SIGNAL_INFO;
     nclx_info.Header.BufferSz = sizeof(nclx_info);
     cll_info.Header.BufferId = MFX_EXTBUFF_CONTENT_LIGHT_LEVEL_INFO;
     cll_info.Header.BufferSz = sizeof(cll_info);
     mdcv_info.Header.BufferId = MFX_EXTBUFF_MASTERING_DISPLAY_COLOUR_VOLUME;
     mdcv_info.Header.BufferSz = sizeof(mdcv_info);
-  }
-};
-
-class intelvpl_surface_mapper {
-  mfxFrameSurface1* surface;
-  mfxStatus sts;
-public:
-  intelvpl_surface_mapper(mfxFrameSurface1* surface, mfxMemoryFlags access) : surface(surface) {
-    sts = surface->FrameInterface->Map(surface, access);
-  }
-  mfxStatus status() const {
-    return sts;
-  }
-  ~intelvpl_surface_mapper() {
-    if (sts != MFX_ERR_NONE)
-      surface->FrameInterface->Unmap(surface);
+    // keep 1 empty image in the image chain
+    images.emplace_back();
   }
 };
 
@@ -422,19 +442,12 @@ static heif_error intelvpl_new_decoder(void** dec)
 static void intelvpl_free_decoder(void* decoder_raw)
 {
   intelvpl_decoder* decoder = (intelvpl_decoder*)decoder_raw;
-  while (decoder->images != NULL) {
-    intelvpl_decoder_image_chain* next = decoder->images->next;
 #ifdef USE_EXTERNAL_MEMORY
-    FreeExternalSystemMemorySurfacePool(decoder->decOutBuf, decoder->decSurfPool);
-    decoder->decOutBuf = NULL;
+  FreeExternalSystemMemorySurfacePool(decoder->decOutBuf, decoder->decSurfPool);
+  decoder->decOutBuf = NULL;
 #else
-    if (decoder->images->decSurfaceOut) {
-      decoder->images->decSurfaceOut->FrameInterface->Release(decoder->images->decSurfaceOut);
-    }
 #endif
-    delete decoder->images;
-    decoder->images = next;
-  }
+  decoder->images.clear();
   mfxStatus sts;
   //MFXVideoDECODE_Close(session);
   delete decoder;
@@ -792,6 +805,7 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
     decoder->initialized = true;
   }
   bool setempty = false;
+  int device_busy_count = 0;
 #ifdef USE_EXTERNAL_MEMORY
   //variables used only in legacy version
   int nIndex = -1;
@@ -818,6 +832,8 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
         ptr += intelvpl_buffer_max_size - bs.DataLength;
         bs.DataLength = intelvpl_buffer_max_size;
     }*/
+    intelvpl_decoder_image_chain& image_current = decoder->images.back();
+    assert(image_current.decSurfaceOut == nullptr);
     sts = MFXVideoDECODE_DecodeFrameAsync(session,
       bs.DataLength == 0 ? NULL : &bs, //(isDraining) ? NULL : &bs,
 #ifdef USE_EXTERNAL_MEMORY
@@ -825,19 +841,11 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
 #else
       NULL,
 #endif
-      & decoder->images_current->decSurfaceOut,
-      &decoder->images_current->syncp);
+      &image_current.decSurfaceOut,
+      &image_current.syncp);
     switch (sts) {
     case MFX_ERR_NONE:
-      decoder->images_current->next = new intelvpl_decoder_image_chain();
-      if (decoder->images_current->next == NULL) {
-        return {
-            heif_error_Decoder_plugin_error,
-            heif_suberror_End_of_data,
-            "new failure\n"
-        };
-      }
-      decoder->images_current = decoder->images_current->next;
+      decoder->images.emplace_back();
       break;
     case MFX_ERR_MORE_DATA:
       // The function requires more bitstream at input before decoding can
@@ -880,6 +888,15 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
     case MFX_WRN_DEVICE_BUSY:
       // For non-CPU implementations,
       // Wait a few milliseconds then try again
+      if(device_busy_count > 20) {
+          return {
+            heif_error_Encoder_plugin_error,
+            heif_suberror_Security_limit_exceeded,
+            "MFX_WRN_DEVICE_BUSY too many times"
+          };
+      }
+      device_busy_count++;
+      _sleep(10);
       break;
     case MFX_WRN_VIDEO_PARAM_CHANGED:
       // The decoder detected a new sequence header in the bitstream.
@@ -920,7 +937,7 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
   }
 
   *out_img = nullptr;
-  if (decoder->images != NULL && decoder->images->decSurfaceOut != NULL) {
+  if (!decoder->images.empty() && decoder->images.front().decSurfaceOut != NULL) {
     mfxStatus sts;
     do {
 #ifdef USE_EXTERNAL_MEMORY
@@ -929,10 +946,12 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
       else
         sts = MFX_ERR_NONE;
 #else
-      sts = decoder->images->decSurfaceOut->FrameInterface->Synchronize(decoder->images->decSurfaceOut, WAIT_100_MILLISECONDS);
+      sts = decoder->images.front().decSurfaceOut->FrameInterface->Synchronize(decoder->images.front().decSurfaceOut, WAIT_100_MILLISECONDS);
 #endif
       if (MFX_ERR_NONE == sts) {
-        mfxFrameSurface1* surface = decoder->images->decSurfaceOut;
+        intelvpl_decoder_image_chain image = std::move(decoder->images.front());
+        decoder->images.pop_front();
+        mfxFrameSurface1* surface = image.decSurfaceOut;
         mfxU16 w, h, pitch;
         mfxFrameInfo* info = &surface->Info;
         mfxFrameData* data = &surface->Data;
@@ -967,14 +986,14 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
         }
         //sts = WriteRawFrame_InternalMem(decoder->images->decSurfaceOut, sink);
 #ifndef USE_EXTERNAL_MEMORY
-        intelvpl_surface_mapper surfaceMap(decoder->images->decSurfaceOut, MFX_MAP_READ);
+        intelvpl_surface_mapper surfaceMap(image.decSurfaceOut, MFX_MAP_READ);
         mfxStatus sts = surfaceMap.status();
         if (sts != MFX_ERR_NONE) {
           return err; // "mfxFrameSurfaceInterface->Map failed (%d)\n"
         }
 #else
-        data->Locked++; // ???
-        std::unique_ptr<mfxU16, void(__cdecl*)(mfxU16*)> unlocker(&data->Locked, [](mfxU16* a) {*a--; });
+        _InterlockedIncrement16((volatile short*)&data->Locked); // TODO: MSVC
+        std::unique_ptr<mfxU16, void(__cdecl*)(mfxU16*)> unlocker(&data->Locked, [](mfxU16* a) {_InterlockedDecrement16((volatile short*)a); });
 #endif
         //sts = WriteRawFrame(decoder->images->decSurfaceOut, f);
         {
@@ -990,7 +1009,7 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
             return err;
           }
           // Y
-          err = heif_image_add_plane_safe(*out_img, heif_channel_Y, info->CropW, info->CropH, info->BitDepthLuma, limits);
+          err = heif_image_add_plane_safe(*out_img, heif_channel_Y, info->CropW, info->CropH, info->BitDepthLuma == 0 ? 8 : info->BitDepthLuma, limits); // TODO
           if (err.code) {
             // copy error message to decoder object because heif_image will be released
             decoder->error_message = err.message;
@@ -1003,16 +1022,16 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
           // Cb Cr
           switch (intelvpl_get_chroma_format(info)) {
           case heif_chroma_420:
-            err = heif_image_add_plane_safe(*out_img, heif_channel_Cb, (info->CropW + 1) / 2, (info->CropH + 1) / 2, info->BitDepthChroma, limits);
-            err = heif_image_add_plane_safe(*out_img, heif_channel_Cr, (info->CropW + 1) / 2, (info->CropH + 1) / 2, info->BitDepthChroma, limits);
+            err = heif_image_add_plane_safe(*out_img, heif_channel_Cb, (info->CropW + 1) / 2, (info->CropH + 1) / 2, info->BitDepthChroma == 0 ? 8 : info->BitDepthChroma, limits);
+            err = heif_image_add_plane_safe(*out_img, heif_channel_Cr, (info->CropW + 1) / 2, (info->CropH + 1) / 2, info->BitDepthChroma == 0 ? 8 : info->BitDepthChroma, limits);
             break;
           case heif_chroma_422:
-            err = heif_image_add_plane_safe(*out_img, heif_channel_Cb, (info->CropW + 1) / 2, info->CropH, info->BitDepthChroma, limits);
-            err = heif_image_add_plane_safe(*out_img, heif_channel_Cr, (info->CropW + 1) / 2, info->CropH, info->BitDepthChroma, limits);
+            err = heif_image_add_plane_safe(*out_img, heif_channel_Cb, (info->CropW + 1) / 2, info->CropH, info->BitDepthChroma == 0 ? 8 : info->BitDepthChroma, limits);
+            err = heif_image_add_plane_safe(*out_img, heif_channel_Cr, (info->CropW + 1) / 2, info->CropH, info->BitDepthChroma == 0 ? 8 : info->BitDepthChroma, limits);
             break;
           case heif_chroma_444:
-            err = heif_image_add_plane_safe(*out_img, heif_channel_Cb, info->CropW, info->CropH, info->BitDepthChroma, limits);
-            err = heif_image_add_plane_safe(*out_img, heif_channel_Cr, info->CropW, info->CropH, info->BitDepthChroma, limits);
+            err = heif_image_add_plane_safe(*out_img, heif_channel_Cb, info->CropW, info->CropH, info->BitDepthChroma == 0 ? 8 : info->BitDepthChroma, limits);
+            err = heif_image_add_plane_safe(*out_img, heif_channel_Cr, info->CropW, info->CropH, info->BitDepthChroma == 0 ? 8 : info->BitDepthChroma, limits);
             break;
           }
           pitch = data->PitchHigh << 16 | data->Pitch;
@@ -1136,23 +1155,6 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
           }
         }
       }
-
-      if (sts != MFX_WRN_IN_EXECUTION) {
-#ifdef USE_EXTERNAL_MEMORY
-#else
-        sts = decoder->images->decSurfaceOut->FrameInterface->Release(decoder->images->decSurfaceOut);
-#endif
-        if (sts != MFX_ERR_NONE)
-          return err; // "Could not release decode output surface"
-        intelvpl_decoder_image_chain* next = decoder->images->next;
-        if (decoder->images_current == decoder->images) {
-          decoder->images_current = next;
-        }
-        delete decoder->images;
-        decoder->images = next;
-      }
-
-
     } while (sts == MFX_WRN_IN_EXECUTION);
     // Set NCLX
     if (decoder->nclx_info.ColourDescriptionPresent) {

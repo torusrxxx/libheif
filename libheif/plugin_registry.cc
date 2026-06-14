@@ -242,8 +242,10 @@ void register_default_plugins()
 #if HAVE_LIBVPL_ENCODER
   register_encoder(get_encoder_plugin_libvpl_HEVC());
   register_encoder(get_encoder_plugin_libvpl_AVC());
+  // TODO: Some Intel processors do not support AV1 encode.
   register_encoder(get_encoder_plugin_libvpl_AV1());
-  // TODO: JPEG was not working
+  // TODO: Intel JPEG is not working for large images, MFX_WRN_DEVICE_BUSY loop.
+  register_encoder(get_encoder_plugin_libvpl_JPEG());
 #endif
 
 #if WITH_UNCOMPRESSED_CODEC
