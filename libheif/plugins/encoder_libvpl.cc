@@ -455,6 +455,12 @@ static heif_error intelvpl_start_sequence_encoding_intern(void* encoder_raw, con
   int input_width = heif_image_get_width(image, heif_channel_Y);
   int input_height = heif_image_get_height(image, heif_channel_Y);
 
+  mfxExtBuffer* extBuffer[4];
+  mfxExtVideoSignalInfo nclx_info = {};
+  mfxExtContentLightLevelInfo cll_info = {};
+  mfxExtMasteringDisplayColourVolume mdcv_info = {};
+  mfxExtEncoderResetOption reset_info = {};
+
   // Initialize encode parameters
   mfxVideoParam encodeParams = {};
   encodeParams.mfx.CodecId = encoder->codecId;
@@ -567,10 +573,6 @@ static heif_error intelvpl_start_sequence_encoding_intern(void* encoder_raw, con
   // add SEI metadata
   encodeParams.NumExtParam = 0;
   if (encoder->codecId != MFX_CODEC_JPEG) {
-    mfxExtBuffer* extBuffer[3];
-    mfxExtVideoSignalInfo nclx_info = {};
-    mfxExtContentLightLevelInfo cll_info = {};
-    mfxExtMasteringDisplayColourVolume mdcv_info = {};
     heif_color_profile_nclx* nclx;
     heif_error get_metadata_err = heif_image_get_nclx_color_profile(image, &nclx);
     if (get_metadata_err.code == 0 && nclx) {
@@ -625,10 +627,13 @@ static heif_error intelvpl_start_sequence_encoding_intern(void* encoder_raw, con
     sts = MFXVideoENCODE_Init(session, &encodeParams);
   }
   else {
-    //sts = MFXVideoENCODE_Reset(session, &encodeParams); // This does not produce a SPS NAL Unit for the next frame/tile.
-    MFXVideoENCODE_Close(session);
-    video_encode_initialized = false;
-    sts = MFXVideoENCODE_Init(session, &encodeParams);
+    // Force producing the SPS NAL Unit after reset
+    reset_info.Header.BufferId = MFX_EXTBUFF_ENCODER_RESET_OPTION;
+    reset_info.Header.BufferSz = sizeof(reset_info);
+    reset_info.StartNewSequence = MFX_CODINGOPTION_ON;
+    extBuffer[encodeParams.NumExtParam] = (mfxExtBuffer*)&reset_info;
+    encodeParams.NumExtParam++;
+    sts = MFXVideoENCODE_Reset(session, &encodeParams);
   }
   if (MFX_ERR_NONE != sts) {
     return heif_error{
