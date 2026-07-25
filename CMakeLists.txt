@@ -322,10 +322,7 @@ plugin_option(LIBVPL_DECODER "Intel LIBVPL decoder" OFF ON)
 plugin_option(LIBVPL_ENCODER "Intel LIBVPL encoder" OFF ON)
 # OFF OFF
 if (WITH_LIBVPL_DECODER OR WITH_LIBVPL_ENCODER)
-    list(PREPEND CMAKE_PREFIX_PATH "E:\\endir\\_vplinstall\\lib\\cmake\\vpl") # ???
     find_package(VPL)
-    INCLUDE_DIRECTORIES("E:\\endir\\_vplinstall\\include")
-    link_directories("E:\\endir\\_vplinstall\\lib")
 endif()
 
 # uncompressed
