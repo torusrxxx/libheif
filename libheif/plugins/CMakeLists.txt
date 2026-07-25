@@ -123,11 +123,23 @@ plugin_compilation(openh264dec OpenH264 OpenH264_DECODER_FOUND OpenH264_DECODER 
 
 set(LIBVPL_DECODER_sources decoder_libvpl.cc decoder_libvpl.h)
 set(LIBVPL_DECODER_extra_plugin_sources)
-plugin_compilation(libvpl VPL VPL_FOUND LIBVPL_DECODER LIBVPL_DECODER)
+plugin_compilation(libvpl_decoder VPL VPL_FOUND LIBVPL_DECODER LIBVPL_DECODER)
 
 set(LIBVPL_ENCODER_sources encoder_libvpl.cc encoder_libvpl.h)
 set(LIBVPL_ENCODER_extra_plugin_sources)
-plugin_compilation(libvpl VPL VPL_FOUND LIBVPL_ENCODER LIBVPL_ENCODER)
+plugin_compilation(libvpl_encoder VPL VPL_FOUND LIBVPL_ENCODER LIBVPL_ENCODER)
+if(VPL_FOUND AND (WITH_LIBVPL_DECODER OR WITH_LIBVPL_ENCODER))
+    if (PLUGIN_LOADING_SUPPORTED_AND_ENABLED AND WITH_LIBVPL_DECODER AND WITH_LIBVPL_DECODER_PLUGIN)
+        target_link_libraries(heif-libvpl_decoder PRIVATE VPL::api VPL::cppapi VPL::dispatcher)
+    else(WITH_LIBVPL_DECODER)
+        target_link_libraries(heif PRIVATE VPL::api VPL::cppapi VPL::dispatcher)
+    endif()
+    if (PLUGIN_LOADING_SUPPORTED_AND_ENABLED AND WITH_LIBVPL_ENCODER AND WITH_LIBVPL_ENCODER_PLUGIN)
+        target_link_libraries(heif-libvpl_encoder PRIVATE VPL::api VPL::cppapi VPL::dispatcher)
+    elseif(WITH_LIBVPL_ENCODER)
+        target_link_libraries(heif PRIVATE VPL::api VPL::cppapi VPL::dispatcher)
+    endif()
+endif()
 
 target_sources(heif PRIVATE
                encoder_mask.h
