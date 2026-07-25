@@ -17,12 +17,6 @@
 #include <unistd.h>
 #endif
 
-#ifdef _DEBUG
-#pragma comment(lib, "vpld.lib")
-#else
-#pragma comment(lib, "vpl.lib")
-#endif
-
 // TODO: Intel VPL memory access violation 10-bit AV1
 // Use external surface works (no idea if it works or not)
 //#define USE_EXTERNAL_MEMORY
