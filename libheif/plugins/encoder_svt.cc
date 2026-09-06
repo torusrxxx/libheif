@@ -74,7 +74,10 @@ struct encoder_struct_svt
     Tune_SSIM = 2,
 #if SVT_AV1_CHECK_VERSION(4, 0, 0)
     Tune_IQ = 3,
-    Tune_MS_SSIM = 4
+    Tune_MS_SSIM = 4,
+#endif
+#if SVT_AV1_CHECK_VERSION(4, 2, 0)
+    Tune_VMAF = 5,
 #endif
   };
 
@@ -121,7 +124,9 @@ static const char* kParam_speed = "speed";
 
 #if SVT_AV1_CHECK_VERSION(0, 9, 1)
 static const char* kParam_tune = "tune";
-#if SVT_AV1_CHECK_VERSION(4, 0, 0)
+#if SVT_AV1_CHECK_VERSION(4, 2, 0)
+static const char* const kParam_tune_valid_values[] = {"vq", "psnr", "ssim", "iq", "ms-ssim", "vmaf", nullptr};
+#elif SVT_AV1_CHECK_VERSION(4, 0, 0)
 static const char* const kParam_tune_valid_values[] = {"vq", "psnr", "ssim", "iq", "ms-ssim", nullptr};
 #else
 static const char* const kParam_tune_valid_values[] = {"vq", "psnr", "ssim", nullptr};
@@ -142,6 +147,21 @@ static heif_error heif_error_codec_library_error = {
   heif_suberror_Unspecified,
   "SVT-AV1 error"
 };
+
+#if SVT_AV1_CHECK_VERSION(4, 2, 0)
+static heif_error heif_error_tune_vmaf_for_still_image = {
+  heif_error_Usage_error,
+  heif_suberror_Invalid_parameter_value,
+  "SVT-AV1 'tune=vmaf' cannot be used for still images, which are always coded all-intra. "
+  "Use 'tune=iq' for still images."
+};
+
+static heif_error heif_error_tune_vmaf_needs_random_access = {
+  heif_error_Usage_error,
+  heif_suberror_Invalid_parameter_value,
+  "SVT-AV1 'tune=vmaf' can only be used with the 'unrestricted' GOP structure."
+};
+#endif
 
 static const int SVT_PLUGIN_PRIORITY = 40;
 
@@ -581,6 +601,12 @@ heif_error svt_set_parameter_string(void* encoder_raw, const char* name, const c
       return heif_error_ok;
     }
 #endif
+#if SVT_AV1_CHECK_VERSION(4, 2, 0)
+    else if (strcmp(value, "vmaf") == 0) {
+      encoder->tune = encoder_struct_svt::Tune_VMAF;
+      return heif_error_ok;
+    }
+#endif
   }
 #endif
 
@@ -641,6 +667,11 @@ heif_error svt_get_parameter_string(void* encoder_raw, const char* name,
         break;
       case encoder_struct_svt::Tune_MS_SSIM:
         save_strcpy(value, value_size, "ms-ssim");
+        break;
+#endif
+#if SVT_AV1_CHECK_VERSION(4, 2, 0)
+      case encoder_struct_svt::Tune_VMAF:
+        save_strcpy(value, value_size, "vmaf");
         break;
 #endif
       default:
@@ -731,6 +762,22 @@ static heif_error svt_start_sequence_encoding_intern(void* encoder_raw, const he
                                                      bool image_sequence)
 {
   auto* encoder = (encoder_struct_svt*) encoder_raw;
+
+#if SVT_AV1_CHECK_VERSION(4, 2, 0)
+  // SVT-AV1 accepts 'tune=vmaf' only with the random access prediction structure.
+  // Still images are always coded all-intra, and the intra-only and low-delay GOP
+  // structures map to ALL_INTRA and LOW_DELAY, for which svt_av1_enc_set_parameter()
+  // would fail with a generic error. Check this here to report a meaningful reason.
+  if (encoder->tune == encoder_struct_svt::Tune_VMAF) {
+    if (!image_sequence) {
+      return heif_error_tune_vmaf_for_still_image;
+    }
+    if (options == nullptr || options->gop_structure != heif_sequence_gop_structure_unrestricted) {
+      return heif_error_tune_vmaf_needs_random_access;
+    }
+  }
+#endif
+
   encoder->input_class = input_class;
   EbErrorType res = EB_ErrorNone;
   heif_error err;
