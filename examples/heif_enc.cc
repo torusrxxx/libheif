@@ -3115,7 +3115,10 @@ int do_encode_sequence(heif_context* context, heif_encoder* encoder, heif_encodi
   // --- add first image as image item
 
   if (!use_video_handler) {
-    do_encode_images(context, encoder, options, {args[0]});
+    int ret = do_encode_images(context, encoder, options, {args[0]});
+    if (ret) {
+      return ret;
+    }
   }
 
   return 0;
