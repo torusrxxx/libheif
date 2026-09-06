@@ -125,4 +125,35 @@ static inline heif_error check_encoder_input_image(const heif_image* image,
                     "Encoder cannot encode images at this bit depth"};
 }
 
+
+/*
+ * An encoder is opened once per sequence, in *_start_sequence_encoding(), and is
+ * configured from the first frame. Encoder_HEVC / Encoder_AVC / Encoder_AVIF /
+ * Encoder_VVC::encode_sequence_frame() call it only while the encoder is not
+ * running yet, so every later frame goes straight to *_encode_sequence_frame().
+ * A plugin that latched a bit depth there and applies it to the planes of a later
+ * frame walks a one byte per sample plane at two bytes per sample: x265, for
+ * example, hands the plane pointers of the current frame to libx265 together with
+ * pic->bitDepth taken from the first frame, and reads past the end of them.
+ *
+ * So a plugin that keeps the bit depth across frames has to check every frame
+ * against that configuration and not only against the codec level set above.
+ * Plugins whose depth is fixed at compile time need nothing extra: passing that
+ * constant to check_encoder_input_image() already pins all frames to one value.
+ *
+ * Call this after check_encoder_input_image(), which has already established that
+ * the luma channel exists and that the chroma channels have the same depth.
+ */
+static inline heif_error check_sequence_frame_bit_depth(const heif_image* image,
+                                                        int configured_bit_depth)
+{
+  if (heif_image_get_bits_per_pixel_range(image, heif_channel_Y) != configured_bit_depth) {
+    return heif_error{heif_error_Encoder_plugin_error,
+                      heif_suberror_Unsupported_bit_depth,
+                      "All frames of a sequence must have the bit depth of the first frame"};
+  }
+
+  return heif_error_ok;
+}
+
 #endif // LIBHEIF_ENCODER_INPUT_CHECK_H

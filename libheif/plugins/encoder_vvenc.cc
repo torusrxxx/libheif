@@ -55,6 +55,9 @@ struct encoder_struct_vvenc
   vvencChromaFormat vvencChroma = VVENC_CHROMA_420;
   uint32_t encoded_width=0, encoded_height=0;
 
+  // bit depth the encoder was opened with, to check the later frames of a sequence against
+  int bit_depth = 8;
+
   // --- output
 
   struct Packet
@@ -451,6 +454,10 @@ static heif_error vvenc_start_sequence_encoding_intern(void* encoder_raw, const 
   };
   }
 
+  // Remember what we opened the encoder with. The frames that follow the first one
+  // in a sequence never reach this function, so they have to be checked against it.
+  encoder->bit_depth = bit_depth;
+
   int input_width = heif_image_get_width(image, heif_channel_Y);
   int input_height = heif_image_get_height(image, heif_channel_Y);
 
@@ -490,7 +497,11 @@ static heif_error vvenc_start_sequence_encoding_intern(void* encoder_raw, const 
     params.m_internChromaFormat = VVENC_CHROMA_400;
   }
   else {
-    params.m_internChromaFormat = encoder->vvencChroma;
+    // vvenc only encodes 4:2:0 (and 4:0:0), and vvenc_query_input_colorspace2() asks
+    // libheif for 4:2:0, so this is the only colour format that can arrive here.
+    // Do not read encoder->vvencChroma: it is written in vvenc_encode_sequence_frame(),
+    // which runs after this function.
+    params.m_internChromaFormat = VVENC_CHROMA_420;
   }
 
   params.m_FrameRate = framerate_denom;
@@ -534,24 +545,43 @@ static heif_error vvenc_start_sequence_encoding_intern(void* encoder_raw, const 
     params.m_sarHeight = static_cast<int>(aspect_v);
   }
 
-  heif_color_profile_nclx* nclx;
-  heif_image_get_nclx_color_profile(image, &nclx);
+  // Colour signalling describes the picture, so it does not belong on an auxiliary
+  // image: an alpha plane is a coverage mask, not colour, and vvenc would put an
+  // unrelated colour description and HDR metadata into its bitstream. This mirrors
+  // the gate on the aspect ratio above.
+  bool signal_colour_info = (input_class == heif_image_input_class_normal ||
+                             input_class == heif_image_input_class_thumbnail);
+
+  heif_color_profile_nclx* nclx = nullptr;
+  if (signal_colour_info) {
+    heif_error nclx_err = heif_image_get_nclx_color_profile(image, &nclx);
+    if (nclx_err.code != heif_error_Ok) {
+      // The image has no NCLX profile. heif_image_get_nclx_color_profile() does not
+      // write to 'nclx' in that case, so it must not be read without this check.
+      nclx = nullptr;
+    }
+  }
+
   if (nclx) {
     params.m_HdrMode = VVENC_HDR_USER_DEFINED;
     params.m_colourDescriptionPresent = true;
+    // vvenc resolves m_vuiParametersPresent (-1 = auto) to 0 unless it turns on an
+    // HDR mode itself, and it explicitly skips that for VVENC_HDR_USER_DEFINED. So
+    // without this the whole colour description is dropped from the bitstream.
+    params.m_vuiParametersPresent = 1;
     params.m_colourPrimaries = nclx->color_primaries;
     params.m_transferCharacteristics = nclx->transfer_characteristics;
     params.m_matrixCoefficients = nclx->matrix_coefficients;
     params.m_videoFullRangeFlag = nclx->full_range_flag;
     heif_nclx_color_profile_free(nclx);
   }
-  if (heif_image_has_content_light_level(image)) {
+  if (signal_colour_info && heif_image_has_content_light_level(image)) {
     heif_content_light_level cll;
     heif_image_get_content_light_level(image, &cll);
     params.m_contentLightLevel[0] = cll.max_content_light_level;
     params.m_contentLightLevel[1] = cll.max_pic_average_light_level;
   }
-  if (heif_image_has_mastering_display_colour_volume(image)) {
+  if (signal_colour_info && heif_image_has_mastering_display_colour_volume(image)) {
     heif_mastering_display_colour_volume mdcv;
     heif_image_get_mastering_display_colour_volume(image, &mdcv);
     params.m_masteringDisplay[0] = mdcv.display_primaries_x[0];
@@ -590,16 +620,22 @@ static heif_error vvenc_start_sequence_encoding_intern(void* encoder_raw, const 
 static heif_error vvenc_encode_sequence_frame(void* encoder_raw, const heif_image* image,
                                               uintptr_t framenr)
 {
-  // VVC signals one bit depth for all planes, and this plugin only
-  // implements 8 bit encoding.
+  // VVC signals one bit depth for all planes. vvenc encodes 8 and 10 bits.
   heif_error input_error = check_encoder_input_image(image, /*supports_monochrome=*/true,
-                                                    {8});
+                                                    {8, 10});
   if (input_error.code != heif_error_Ok) {
     return input_error;
   }
 
   encoder_struct_vvenc* encoder = (encoder_struct_vvenc*) encoder_raw;
   vvencEncoder* vvencoder = encoder->vvencoder;
+
+  // params.m_inputBitDepth was taken from the first frame of the sequence, while the
+  // sample width used to fill the input buffer below is this frame's.
+  input_error = check_sequence_frame_bit_depth(image, encoder->bit_depth);
+  if (input_error.code != heif_error_Ok) {
+    return input_error;
+  }
 
   bool isGreyscale = (heif_image_get_colorspace(image) == heif_colorspace_monochrome);
   heif_chroma chroma = heif_image_get_chroma_format(image);
@@ -626,8 +662,8 @@ static heif_error vvenc_encode_sequence_frame(void* encoder_raw, const heif_imag
     vvencChroma = VVENC_CHROMA_420;
     chroma_stride_shift = 1;
     chroma_height_shift = 1;
-    input_chroma_width = input_width / 2 + (input_width & 1);
-    input_chroma_height = input_height / 2 + (input_height & 1);
+    input_chroma_width = (input_width + 1) / 2;
+    input_chroma_height = (input_height + 1) / 2;
   }
   else {
     // vvenc only supports monochrome and 4:2:0 (https://github.com/fraunhoferhhi/vvenc/issues/450)
@@ -643,8 +679,8 @@ static heif_error vvenc_encode_sequence_frame(void* encoder_raw, const heif_imag
   if (chroma != heif_chroma_monochrome) {
     int w = heif_image_get_width(image, heif_channel_Y);
     int h = heif_image_get_height(image, heif_channel_Y);
-    if (chroma != heif_chroma_444) { w = w / 2 + (w & 1); }
-    if (chroma == heif_chroma_420) { h = h / 2 + (h & 1); }
+    if (chroma != heif_chroma_444) { w = (w + 1) / 2; }
+    if (chroma == heif_chroma_420) { h = (h + 1) / 2; }
 
     assert(heif_image_get_width(image, heif_channel_Cb) == w);
     assert(heif_image_get_width(image, heif_channel_Cr) == w);
@@ -654,38 +690,6 @@ static heif_error vvenc_encode_sequence_frame(void* encoder_raw, const heif_imag
     (void) h;
   }
 
-
-  heif_color_profile_nclx* nclx = nullptr;
-  heif_error err = heif_image_get_nclx_color_profile(image, &nclx);
-  if (err.code != heif_error_Ok) {
-    nclx = nullptr;
-  }
-
-  // make sure NCLX profile is deleted at end of function
-  auto nclx_deleter = std::unique_ptr<heif_color_profile_nclx, void (*)(heif_color_profile_nclx*)>(nclx, heif_nclx_color_profile_free);
-
-#if 0
-  if (nclx) {
-    config->vui.fullrange = nclx->full_range_flag;
-  }
-  else {
-    config->vui.fullrange = 1;
-  }
-
-  if (nclx &&
-      (input_class == heif_image_input_class_normal ||
-       input_class == heif_image_input_class_thumbnail)) {
-    config->vui.colorprim = nclx->color_primaries;
-    config->vui.transfer = nclx->transfer_characteristics;
-    config->vui.colormatrix = nclx->matrix_coefficients;
-  }
-
-  config->qp = ((100 - encoder->quality) * 51 + 50) / 100;
-  config->lossless = encoder->lossless ? 1 : 0;
-
-  config->width = encoded_width;
-  config->height = encoded_height;
-#endif
 
   // Note: it is ok to cast away the const, as the image content is not changed.
   // However, we have to guarantee that there are no plane pointers or stride values kept over calling the svt_encode_image() function.
