@@ -61,7 +61,7 @@ enum {
 
 #define WAIT_100_MILLISECONDS 100
 
-#define ALIGN16(value)           (((value + 15) >> 4) << 4)
+#define ALIGN32(value)           (((value + 31) >> 5) << 5)
 #define VPLVERSION(major, minor) (major << 16 | minor)
 
 extern mfxSession intel_qsv_session;
