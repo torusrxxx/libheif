@@ -46,98 +46,9 @@
 #include "decoder_libvpl.h"
 #include <cassert>
 #include <string>
-
-#ifdef USE_EXTERNAL_MEMORY
-mfxU32 GetSurfaceSize(mfxU32 FourCC, mfxU32 width, mfxU32 height) {
-  mfxU32 nbytes = 0;
-
-  switch (FourCC) {
-  case MFX_FOURCC_I420:
-  case MFX_FOURCC_NV12:
-    nbytes = width * height + (width >> 1) * (height >> 1) + (width >> 1) * (height >> 1);
-    break;
-  case MFX_FOURCC_I010:
-  case MFX_FOURCC_P010:
-    nbytes = width * height + (width >> 1) * (height >> 1) + (width >> 1) * (height >> 1);
-    nbytes *= 2;
-    break;
-  case MFX_FOURCC_RGB4:
-  case MFX_FOURCC_BGR4:
-    nbytes = width * height * 4;
-    break;
-  default:
-    break;
-  }
-
-  return nbytes;
-}
-
-int GetFreeSurfaceIndex(std::vector<mfxFrameSurface1>& SurfacesPool) {
-  for (mfxU16 i = 0; i < SurfacesPool.size(); i++) {
-    if (0 == SurfacesPool[i].Data.Locked)
-      return i;
-  }
-  return MFX_ERR_NOT_FOUND;
-}
-
-
-mfxStatus AllocateExternalSystemMemorySurfacePool(mfxU8** buf,
-  std::vector<mfxFrameSurface1>& surfpool,
-  mfxFrameInfo frame_info) {
-  // initialize surface pool (I420, RGB4 format)
-  mfxU32 surfaceSize = GetSurfaceSize(frame_info.FourCC, frame_info.Width, frame_info.Height);
-  if (!surfaceSize)
-    return MFX_ERR_MEMORY_ALLOC;
-
-  size_t framePoolBufSize = static_cast<size_t>(surfaceSize) * surfpool.size();
-  *buf = reinterpret_cast<mfxU8*>(calloc(framePoolBufSize, 1));
-
-  mfxU16 surfW;
-  mfxU16 surfH = frame_info.Height;
-
-  if (frame_info.FourCC == MFX_FOURCC_NV12) {
-    surfW = frame_info.Width;
-    for (mfxU32 i = 0; i < surfpool.size(); i++) {
-      surfpool[i] = { 0 };
-      surfpool[i].Info = frame_info;
-      size_t buf_offset = static_cast<size_t>(i) * surfaceSize;
-      surfpool[i].Data.Y = *buf + buf_offset;
-      surfpool[i].Data.UV = *buf + buf_offset + (surfW * surfH);
-      surfpool[i].Data.V = surfpool[i].Data.UV + 1;
-      surfpool[i].Data.PitchLow = surfW;
-      surfpool[i].Data.PitchHigh = 0;
-    }
-  }
-  else if (frame_info.FourCC == MFX_FOURCC_P010) {
-    surfW = (frame_info.FourCC == MFX_FOURCC_P010) ? frame_info.Width * 2 : frame_info.Width;
-
-    for (mfxU32 i = 0; i < surfpool.size(); i++) {
-      surfpool[i] = { 0 };
-      surfpool[i].Info = frame_info;
-      size_t buf_offset = static_cast<size_t>(i) * surfaceSize;
-      surfpool[i].Data.Y = *buf + buf_offset;
-      surfpool[i].Data.U = *buf + buf_offset + (surfW * surfH);
-      surfpool[i].Data.V = surfpool[i].Data.U + ((surfW / 2) * (surfH / 2));
-      surfpool[i].Data.PitchLow = surfW;
-    }
-  }
-  else {
-    return MFX_ERR_MEMORY_ALLOC;
-  }
-
-  return MFX_ERR_NONE;
-}
-
-void FreeExternalSystemMemorySurfacePool(mfxU8* dec_buf, std::vector<mfxFrameSurface1>& surfpool) {
-  if (dec_buf) {
-    free(dec_buf);
-  }
-
-  surfpool.clear();
-}
-#endif
-#define intelvpl_buffer_max_size 4096
 #include <list>
+
+#define intelvpl_buffer_max_size 4096
 
 class intelvpl_surface_mapper {
   mfxFrameSurface1* surface;
@@ -182,7 +93,6 @@ struct intelvpl_decoder_image_chain
 };
 struct intelvpl_decoder
 {
-  bool strict_decoding = false;
   bool initialized = false;
   std::string error_message;
   std::list<intelvpl_decoder_image_chain> images;
@@ -428,7 +338,6 @@ static heif_error intelvpl_new_decoder(void** dec)
   heif_decoder_plugin_options options;
   options.format = heif_compression_HEVC;
   options.num_threads = 0;
-  options.strict_decoding = false;
 
   return intelvpl_new_decoder2(dec, &options);
 }
@@ -436,178 +345,15 @@ static heif_error intelvpl_new_decoder(void** dec)
 static void intelvpl_free_decoder(void* decoder_raw)
 {
   intelvpl_decoder* decoder = (intelvpl_decoder*)decoder_raw;
-#ifdef USE_EXTERNAL_MEMORY
-  FreeExternalSystemMemorySurfacePool(decoder->decOutBuf, decoder->decSurfPool);
-  decoder->decOutBuf = NULL;
-#else
-#endif
   decoder->images.clear();
   mfxStatus sts;
-  //MFXVideoDECODE_Close(session);
   delete decoder;
 }
 
 
 void intelvpl_set_strict_decoding(void* decoder_raw, int flag)
 {
-  intelvpl_decoder* decoder = (intelvpl_decoder*)decoder_raw;
-
-  decoder->strict_decoding = flag; // TODO
 }
-
-
-/*static heif_error intelvpl_push_datax(intelvpl_decoder* decoder, const uint8_t* ptr, uint32_t nal_size) {
-    mfxStatus sts;
-    uint32_t remaining = nal_size;
-    mfxBitstream& bs = decoder->bitstream;
-    if (!decoder->initialized) {
-        decoder->decodeParams.mfx.CodecId = MFX_CODEC_HEVC;
-        decoder->decodeParams.IOPattern = MFX_IOPATTERN_OUT_SYSTEM_MEMORY;
-        while (true) {
-        if (bs.DataLength > 0) {
-            memmove(bs.Data, bs.Data + bs.DataOffset, bs.DataLength);
-        }
-        bs.DataOffset = 0;
-        if (remaining > intelvpl_buffer_max_size) {
-            bs.DataLength = intelvpl_buffer_max_size;
-            memcpy(bs.Data, ptr, intelvpl_buffer_max_size);
-            ptr += intelvpl_buffer_max_size;
-            remaining -= intelvpl_buffer_max_size;
-        }
-        else {
-            bs.DataLength = remaining;
-            memcpy(bs.Data, ptr, remaining);
-            ptr += remaining;
-            remaining = 0;
-        }
-
-
-        sts = MFXVideoDECODE_DecodeHeader(decoder->session, &bs, &decoder->decodeParams);
-        if (MFX_ERR_NONE != sts && MFX_ERR_MORE_DATA != sts) {
-            return {
-              heif_error_Decoder_plugin_error,
-              heif_suberror_End_of_data,
-              "Error decoding header\n"
-            };
-        }
-        if (MFX_ERR_NONE == sts)
-            break;
-        if (MFX_ERR_MORE_DATA == sts && remaining == 0) {
-            return heif_error_ok;
-        }
-        }
-
-        // input parameters finished, now initialize decode
-        sts = MFXVideoDECODE_Init(decoder->session, &decoder->decodeParams);
-        if (MFX_ERR_NONE != sts) {
-            return {
-              heif_error_Decoder_plugin_error,
-              heif_suberror_End_of_data,
-              "Error initializing decode\n"
-            };
-        }
-        decoder->initialized = true;
-    }
-    while (remaining != 0) {
-        if (bs.DataLength > 0 && bs.DataOffset > 0) {
-            // Fix data offset to 0
-            memmove(bs.Data, bs.Data + bs.DataOffset, bs.DataLength);
-        }
-        bs.DataOffset = 0;
-        if (bs.DataLength + remaining <= intelvpl_buffer_max_size) {
-            memcpy(bs.Data + bs.DataLength, ptr, remaining);
-            bs.DataLength += remaining;
-            ptr += remaining;
-            remaining = 0;
-        }
-        else {
-            memcpy(bs.Data + bs.DataLength, ptr, intelvpl_buffer_max_size - bs.DataLength);
-            remaining -= intelvpl_buffer_max_size - bs.DataLength;
-            ptr += intelvpl_buffer_max_size - bs.DataLength;
-            bs.DataLength = intelvpl_buffer_max_size;
-        }
-        printf("Debug: calling MFXVideoDECODE_DecodeFrameAsync\n");
-        sts = MFXVideoDECODE_DecodeFrameAsync(decoder->session,
-            &bs, //(isDraining) ? NULL : &bs,
-            NULL,
-            &decoder->images_current->decSurfaceOut,
-            &decoder->images_current->syncp);
-        switch (sts) {
-        case MFX_ERR_NONE:
-            printf("Debug: MFXVideoDECODE_DecodeFrameAsync return MFX_ERR_NONE\n");
-            decoder->images_current->next = new intelvpl_decoder_image_chain();
-            if (decoder->images_current->next == NULL) {
-                return {
-                  heif_error_Decoder_plugin_error,
-                  heif_suberror_End_of_data,
-                  "new failure\n"
-                };
-            }
-            decoder->images_current = decoder->images_current->next;
-            break;
-        case MFX_ERR_MORE_DATA:
-            // The function requires more bitstream at input before decoding can
-            // proceed
-            break;
-        case MFX_ERR_MORE_SURFACE:
-            // The function requires more frame surface at output before decoding
-            // can proceed. This applies to external memory allocations and should
-            // not be expected for a simple internal allocation case like this
-            return {
-              heif_error_Decoder_plugin_error,
-              heif_suberror_End_of_data,
-              "MFX_ERR_MORE_SURFACE\n"
-            };
-            break;
-        case MFX_ERR_DEVICE_LOST:
-            // For non-CPU implementations,
-            // Cleanup if device is lost
-            return {
-              heif_error_Decoder_plugin_error,
-              heif_suberror_End_of_data,
-              "MFX_ERR_DEVICE_LOST\n"
-            };
-            break;
-        case MFX_WRN_DEVICE_BUSY:
-            // For non-CPU implementations,
-            // Wait a few milliseconds then try again
-            break;
-        case MFX_WRN_VIDEO_PARAM_CHANGED:
-            // The decoder detected a new sequence header in the bitstream.
-            // Video parameters may have changed.
-            // In external memory allocation case, might need to reallocate the
-            // output surface
-            break;
-        case MFX_ERR_INCOMPATIBLE_VIDEO_PARAM:
-            // The function detected that video parameters provided by the
-            // application are incompatible with initialization parameters. The
-            // application should close the component and then reinitialize it
-            return {
-              heif_error_Decoder_plugin_error,
-              heif_suberror_End_of_data,
-              "MFX_ERR_INCOMPATIBLE_VIDEO_PARAM\n"
-            };
-            break;
-        case MFX_ERR_REALLOC_SURFACE:
-            // Bigger surface_work required. May be returned only if
-            // mfxInfoMFX::EnableReallocRequest was set to ON during initialization.
-            // This applies to external memory allocations and should not be
-            // expected for a simple internal allocation case like this
-            return {
-              heif_error_Decoder_plugin_error,
-              heif_suberror_End_of_data,
-              "MFX_ERR_REALLOC_SURFACE\n"
-            };
-            break;
-        default:
-            return {
-              heif_error_Decoder_plugin_error,
-              heif_suberror_End_of_data,
-              "unknown status\n"
-            };
-        }
-    }
-}*/
 
 static heif_error intelvpl_push_data2(void* decoder_raw, const void* data, size_t size, uintptr_t userdata)
 {
@@ -626,10 +372,6 @@ static heif_error intelvpl_push_data(void* decoder_raw, const void* data, size_t
 static heif_error intelvpl_flush_data(void* decoder_raw)
 {
   // TODO: actually flush
-  //intelvpl_decoder* decoder = (intelvpl_decoder*) decoder_raw;
-
-//de265_flush_data(decoder->ctx);
-
   return heif_error_ok;
 }
 
@@ -665,17 +407,6 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
   size_t hevc_data_size;
   if (!decoder->initialized) {
     if (decoder->decodeParams.mfx.CodecId == MFX_CODEC_HEVC || decoder->decodeParams.mfx.CodecId == MFX_CODEC_AVC) {
-      /*NalMap nalus;
-      err = nalus.parseHevcNalu(decoder->data.data(), decoder->data.size());
-      if (err.code != heif_error_Ok) {
-          return err;
-      }
-
-      err = nalus.buildWithStartCodesHevc(&hevc_data, &hevc_data_size, 0);
-
-      if (err.code != heif_error_Ok) {
-          return err;
-      }*/
       // TODO: Why not NALU
       hevc_data = (uint8_t*)_aligned_malloc(decoder->data.size(), 32);
       hevc_data_size = decoder->data.size();
@@ -758,6 +489,9 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
       video_decode_initialized = true;
     }
     else {
+      // Not necessary to reinit session like below.
+      // MFXVideoDECODE_Close(session);
+      // sts = MFXVideoDECODE_Init(session, &decoder->decodeParams);
       sts = MFXVideoDECODE_Reset(session, &decoder->decodeParams);
       if (MFX_ERR_NONE != sts) {
         return {
@@ -767,74 +501,16 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
         };
       }
     }
-    //else {
-    //    MFXVideoDECODE_Close(session);
-    //    sts = MFXVideoDECODE_Init(session, &decoder->decodeParams);
-    //    if (MFX_ERR_NONE != sts) {
-    //        return {
-    //          heif_error_Decoder_plugin_error,
-    //          heif_suberror_End_of_data,
-    //          "Error initializing decode\n"
-    //        };
-    //    }
-    //}
-#ifdef USE_EXTERNAL_MEMORY
-    mfxFrameAllocRequest decRequest = {};
-    // Query number required surfaces for decoder
-    MFXVideoDECODE_QueryIOSurf(session, &decoder->decodeParams, &decRequest);
-
-    // External (application) allocation of decode surfaces
-    decoder->decSurfPool.resize(decRequest.NumFrameSuggested);
-    sts = AllocateExternalSystemMemorySurfacePool(&decoder->decOutBuf,
-      decoder->decSurfPool,
-      decoder->decodeParams.mfx.FrameInfo);
-    if (MFX_ERR_NONE != sts) {
-      return {
-          heif_error_Decoder_plugin_error,
-          heif_suberror_End_of_data,
-          "Error in external surface allocation\n"
-      };
-    }
-#endif
     decoder->initialized = true;
   }
   bool setempty = false;
   int device_busy_count = 0;
-#ifdef USE_EXTERNAL_MEMORY
-  //variables used only in legacy version
-  int nIndex = -1;
-
-  mfxFrameAllocRequest decRequest = {};
-  MFXVideoDECODE_QueryIOSurf(session, &decoder->decodeParams, &decRequest);
-  nIndex = GetFreeSurfaceIndex(decoder->decSurfPool);
-#endif
   while (bs.DataLength > 0 || setempty) {
-    /*if (bs.DataLength > 0 && bs.DataOffset > 0) {
-        // Fix data offset to 0
-        memmove(bs.Data, bs.Data + bs.DataOffset, bs.DataLength);
-    }
-    bs.DataOffset = 0;
-    if (bs.DataLength + remaining <= intelvpl_buffer_max_size) {
-        memcpy(bs.Data + bs.DataLength, ptr, remaining);
-        bs.DataLength += remaining;
-        ptr += remaining;
-        remaining = 0;
-    }
-    else {
-        memcpy(bs.Data + bs.DataLength, ptr, intelvpl_buffer_max_size - bs.DataLength);
-        remaining -= intelvpl_buffer_max_size - bs.DataLength;
-        ptr += intelvpl_buffer_max_size - bs.DataLength;
-        bs.DataLength = intelvpl_buffer_max_size;
-    }*/
     intelvpl_decoder_image_chain& image_current = decoder->images.back();
     assert(image_current.decSurfaceOut == nullptr);
     sts = MFXVideoDECODE_DecodeFrameAsync(session,
-      bs.DataLength == 0 ? NULL : &bs, //(isDraining) ? NULL : &bs,
-#ifdef USE_EXTERNAL_MEMORY
-      & decoder->decSurfPool[nIndex],
-#else
+      bs.DataLength == 0 ? NULL : &bs,
       NULL,
-#endif
       &image_current.decSurfaceOut,
       &image_current.syncp);
     switch (sts) {
@@ -851,25 +527,6 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
         setempty = false;
       }
       break;
-#ifdef USE_EXTERNAL_MEMORY
-    case MFX_ERR_MORE_SURFACE:
-      // The function requires more frame surface at output before decoding
-      // can proceed. This applies to external memory allocations and should
-      // not be expected for a simple internal allocation case like this
-      nIndex = GetFreeSurfaceIndex(decoder->decSurfPool);
-      break;
-    case MFX_ERR_REALLOC_SURFACE:
-      // Bigger surface_work required. May be returned only if
-      // mfxInfoMFX::EnableReallocRequest was set to ON during initialization.
-      // This applies to external memory allocations and should not be
-      // expected for a simple internal allocation case like this
-      return {
-          heif_error_Decoder_plugin_error,
-          heif_suberror_End_of_data,
-          "MFX_ERR_REALLOC_SURFACE\n"
-      };
-      break;
-#endif
     case MFX_ERR_DEVICE_LOST:
       // For non-CPU implementations,
       // Cleanup if device is lost
@@ -934,14 +591,7 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
   if (!decoder->images.empty() && decoder->images.front().decSurfaceOut != NULL) {
     mfxStatus sts;
     do {
-#ifdef USE_EXTERNAL_MEMORY
-      if (decoder->images_current->syncp != NULL) // ???
-        sts = MFXVideoCORE_SyncOperation(session, decoder->images_current->syncp, WAIT_100_MILLISECONDS);
-      else
-        sts = MFX_ERR_NONE;
-#else
       sts = decoder->images.front().decSurfaceOut->FrameInterface->Synchronize(decoder->images.front().decSurfaceOut, WAIT_100_MILLISECONDS);
-#endif
       if (MFX_ERR_NONE == sts) {
         intelvpl_decoder_image_chain image = std::move(decoder->images.front());
         decoder->images.pop_front();
@@ -959,37 +609,25 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
           return err;
         }
 
-        // Why?
-        /*if (data->Corrupted != MFX_CORRUPTION_NO && data->Corrupted != MFX_CORRUPTION_MINOR) {
+        // Return decode failure
+        if (data->Corrupted != MFX_CORRUPTION_NO && data->Corrupted != MFX_CORRUPTION_MINOR) {
             return { heif_error_Invalid_input,
                     heif_suberror_Decompression_invalid_data,
                     "Bitstream is corrupted" };
-        }*/
+        }
 
         if (limits &&
           limits->max_image_size_pixels &&
           limits->max_image_size_pixels / h < w) {
-
-          //std::stringstream sstr;
-          //sstr << "Allocating an image of size " << w << "x" << h << " exceeds the security limit of "
-          //    << limits->max_image_size_pixels << " pixels";
-
           return { heif_error_Memory_allocation_error,
                   heif_suberror_Security_limit_exceeded,
-                  "" }; // sstr.str().c_str()
+                  "Security limit exceeded"};
         }
-        //sts = WriteRawFrame_InternalMem(decoder->images->decSurfaceOut, sink);
-#ifndef USE_EXTERNAL_MEMORY
         intelvpl_surface_mapper surfaceMap(image.decSurfaceOut, MFX_MAP_READ);
         mfxStatus sts = surfaceMap.status();
         if (sts != MFX_ERR_NONE) {
-          return err; // "mfxFrameSurfaceInterface->Map failed (%d)\n"
+          return err;
         }
-#else
-        _InterlockedIncrement16((volatile short*)&data->Locked); // TODO: MSVC
-        std::unique_ptr<mfxU16, void(__cdecl*)(mfxU16*)> unlocker(&data->Locked, [](mfxU16* a) {_InterlockedDecrement16((volatile short*)a); });
-#endif
-        //sts = WriteRawFrame(decoder->images->decSurfaceOut, f);
         {
           // TODO: mono not supported
 

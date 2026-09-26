@@ -406,7 +406,7 @@ Op_YCbCr444_to_YCbCr422_average<Pixel>::convert_colorspace(const std::shared_ptr
 
   // TODO: check whether we can use HeifPixelImage::transfer_channel_from_image_as() instead of copying Y and Alpha
 
-  for (y = 0; y < height; y++) {
+  for (uint32_t y = 0; y < height; y++) {
     size_t copyWidth = static_cast<size_t>(width) * sizeof(Pixel);
 
     memcpy(&out_y[y * out_y_stride], &in_y[y * in_y_stride], copyWidth);
@@ -674,7 +674,7 @@ Op_YCbCr420_bilinear_to_YCbCr444<Pixel>::convert_colorspace(const std::shared_pt
 
   // TODO: check whether we can use HeifPixelImage::transfer_channel_from_image_as() instead of copying Y and Alpha
 
-  for (y = 0; y < height; y++) {
+  for (uint32_t y = 0; y < height; y++) {
     size_t copyWidth = static_cast<size_t>(width) * sizeof(Pixel);
 
     memcpy(&out_y[y * out_y_stride], &in_y[y * in_y_stride], copyWidth);

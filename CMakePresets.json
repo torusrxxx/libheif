@@ -190,7 +190,6 @@
         "WITH_REDUCED_VISIBILITY" : "OFF",
         "WITH_UNCOMPRESSED_CODEC" : "ON",
         "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
-        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
       }
     },
     {

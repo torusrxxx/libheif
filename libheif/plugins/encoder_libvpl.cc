@@ -600,15 +600,8 @@ static heif_error intelvpl_start_sequence_encoding_intern(void* encoder_raw, con
     encodeParams.ExtParam = extBuffer;
   }
 
-
-  // --- encode headers
-
-  // Not needed. Headers are also output by kvazaar together with the images.
-
-
   // Initialize encoder
   if (!video_encode_initialized) {
-    // Crash here???
     // Validate video encode parameters
     // - In this example the validation result is written to same structure
     // - MFX_WRN_INCOMPATIBLE_VIDEO_PARAM is returned if some of the video parameters are not supported,
@@ -685,6 +678,7 @@ static heif_error intelvpl_encode_sequence_frame(void* encoder_raw, const heif_i
   sts = MFXMemory_GetSurfaceForEncode(session, &encSurfaceIn);
   //VERIFY(MFX_ERR_NONE == sts, "Could not get encode surface");
   {
+    // Map surface to memory
     intelvpl_surface_mapper mapper(encSurfaceIn, MFX_MAP_WRITE);
     sts = mapper.status();
     if (sts != MFX_ERR_NONE) {
