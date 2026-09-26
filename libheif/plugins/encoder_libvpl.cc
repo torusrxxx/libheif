@@ -566,8 +566,8 @@ static heif_error intelvpl_start_sequence_encoding_intern(void* encoder_raw, con
   }
   encodeParams.mfx.FrameInfo.CropW = input_width;
   encodeParams.mfx.FrameInfo.CropH = input_height;
-  encodeParams.mfx.FrameInfo.Width = ALIGN16(input_width);
-  encodeParams.mfx.FrameInfo.Height = ALIGN16(input_height);
+  encodeParams.mfx.FrameInfo.Width = ALIGN32(input_width);
+  encodeParams.mfx.FrameInfo.Height = ALIGN32(input_height);
 
   encodeParams.IOPattern = MFX_IOPATTERN_IN_SYSTEM_MEMORY;
   // add SEI metadata
