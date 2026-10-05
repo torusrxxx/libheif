@@ -66,4 +66,10 @@ enum {
 
 extern mfxSession intel_qsv_session;
 
+class IntelQSVLockGuard {
+public:
+	IntelQSVLockGuard();
+	~IntelQSVLockGuard();
+};
+
 #endif

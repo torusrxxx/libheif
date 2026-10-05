@@ -143,6 +143,7 @@ public:
 
 static void intelvpl_init_plugin()
 {
+  IntelQSVLockGuard lock_guard;
   // Initialize session
   if (!loader)
     loader = MFXLoad();
@@ -171,6 +172,7 @@ static void intelvpl_init_plugin()
 
 static void intelvpl_cleanup_plugin()
 {
+  IntelQSVLockGuard lock_guard;
   if (session) {
     if (video_encode_initialized) {
       MFXVideoENCODE_Close(session);
@@ -243,6 +245,7 @@ static heif_error intelvpl_init_session(mfxU32 codecId) {
   if (session != NULL)
     return { heif_error_Ok, heif_suberror_Unspecified, kSuccess };
 
+  IntelQSVLockGuard lock_guard;
   // variables used only in 2.x version
   mfxStatus sts;
   mfxConfig cfg[3];
@@ -359,6 +362,7 @@ static heif_error intelvpl_new_encoder_JPEG(void** enc)
 
 static void intelvpl_free_encoder(void* encoder_raw)
 {
+  IntelQSVLockGuard lock_guard;
   intelvpl_encoder* encoder = (intelvpl_encoder*)encoder_raw;
   mfxStatus sts;
   //MFXVideoencode_Close(session);
@@ -444,6 +448,7 @@ static heif_error intelvpl_start_sequence_encoding_intern(void* encoder_raw, con
   const heif_sequence_encoding_options* options,
   bool image_sequence)
 {
+  IntelQSVLockGuard lock_guard;
   intelvpl_encoder* encoder = (intelvpl_encoder*)encoder_raw;
   mfxStatus sts = MFX_ERR_NONE;
 
@@ -665,6 +670,7 @@ static heif_error intelvpl_encode_sequence_frame(void* encoder_raw, const heif_i
     return err;
   }
 */
+  IntelQSVLockGuard lock_guard;
   mfxStatus sts;
   bool isGreyscale = (heif_image_get_colorspace(image) == heif_colorspace_monochrome);
   heif_chroma chroma = heif_image_get_chroma_format(image);
@@ -733,7 +739,7 @@ static heif_error intelvpl_encode_sequence_frame(void* encoder_raw, const heif_i
       if (encSurfaceIn->Info.Shift == 0) { // No shift
         for (int y = 0; y < input_height; y++) {
           for (int x = 0; x < input_width; x++) {
-            encSurfaceIn->Data.Y16[y * (stride[0] / 2) + x] = dataY[y * (stride[0] / 2) + x];
+            encSurfaceIn->Data.Y16[y * (pitch / 2) + x] = dataY[y * (stride[0] / 2) + x];
           }
         }
         uint16_t* dataCb = (uint16_t*)data[1];
@@ -749,7 +755,7 @@ static heif_error intelvpl_encode_sequence_frame(void* encoder_raw, const heif_i
       else { // Shift
         for (int y = 0; y < input_height; y++) {
           for (int x = 0; x < input_width; x++) {
-            encSurfaceIn->Data.Y16[y * (stride[0] / 2) + x] = dataY[y * (stride[0] / 2) + x] << 6;
+            encSurfaceIn->Data.Y16[y * (pitch / 2) + x] = dataY[y * (stride[0] / 2) + x] << 6;
           }
         }
         uint16_t* dataCb = (uint16_t*)data[1];
@@ -890,6 +896,7 @@ static heif_error intelvpl_end_sequence_encoding(void* encoder_raw)
   intelvpl_encoder* encoder = (intelvpl_encoder*)encoder_raw;
   int framenum = 0;
   mfxStatus sts;
+  IntelQSVLockGuard lock_guard;
 
   for (;;) {
     sts = MFXVideoENCODE_EncodeFrameAsync(session,

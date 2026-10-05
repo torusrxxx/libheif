@@ -159,6 +159,7 @@ bool video_decode_initialized = false;
 extern bool video_encode_initialized;
 static void intelvpl_init_plugin()
 {
+  IntelQSVLockGuard lock_guard;
   // Initialize session
   if (!loader)
     loader = MFXLoad();
@@ -168,6 +169,7 @@ static void intelvpl_init_plugin()
 
 static void intelvpl_deinit_plugin()
 {
+  IntelQSVLockGuard lock_guard;
   if (session) {
     if (video_decode_initialized) {
       MFXVideoDECODE_Close(session);
@@ -213,13 +215,11 @@ static int intelvpl_does_support_format2(const heif_decoder_plugin_compressed_fo
 }
 
 static heif_error intelvpl_init_session(uint32_t codecId) {
-#ifdef ENABLE_PARALLEL_TILE_DECODING
-#error no parallel
-#endif
   if (session != NULL)
     return { heif_error_Ok, heif_suberror_Unspecified, kSuccess };
 
   // variables used only in 2.x version
+  IntelQSVLockGuard lock_guard;
   mfxStatus sts;
   mfxConfig cfg[3];
   mfxVariant cfgVal[3];
@@ -405,6 +405,7 @@ static heif_error intelvpl_decode_next_image2(void* decoder_raw,
   uint8_t* hevc_data = NULL;
   std::unique_ptr<uint8_t, void(*)(void*)> hevc_data_free(hevc_data, _aligned_free);
   size_t hevc_data_size;
+  IntelQSVLockGuard lock_guard;
   if (!decoder->initialized) {
     if (decoder->decodeParams.mfx.CodecId == MFX_CODEC_HEVC || decoder->decodeParams.mfx.CodecId == MFX_CODEC_AVC) {
       // TODO: Why not NALU

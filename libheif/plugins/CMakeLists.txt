@@ -222,11 +222,11 @@ set(OpenH264_DECODER_sources decoder_openh264.cc decoder_openh264.h)
 set(OpenH264_DECODER_extra_plugin_sources)
 plugin_compilation(openh264dec OpenH264 OpenH264_DECODER_FOUND OpenH264_DECODER OpenH264_DECODER)
 
-set(LIBVPL_DECODER_sources decoder_libvpl.cc decoder_libvpl.h)
+set(LIBVPL_DECODER_sources decoder_libvpl.cc decoder_libvpl.h hardware_intel_qsv.cc hardware_intel_qsv.h)
 set(LIBVPL_DECODER_extra_plugin_sources)
 plugin_compilation(libvpl_decoder VPL VPL_FOUND LIBVPL_DECODER LIBVPL_DECODER)
 
-set(LIBVPL_ENCODER_sources encoder_libvpl.cc encoder_libvpl.h)
+set(LIBVPL_ENCODER_sources encoder_libvpl.cc encoder_libvpl.h hardware_intel_qsv.cc hardware_intel_qsv.h)
 set(LIBVPL_ENCODER_extra_plugin_sources)
 plugin_compilation(libvpl_encoder VPL VPL_FOUND LIBVPL_ENCODER LIBVPL_ENCODER)
 if(VPL_FOUND AND (WITH_LIBVPL_DECODER OR WITH_LIBVPL_ENCODER))
